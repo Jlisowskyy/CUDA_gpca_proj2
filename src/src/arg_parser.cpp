@@ -48,6 +48,7 @@ void ArgParser::PrintHelp() {
         std::cout << "- \"" << test_name << "\"\n";
     }
 
+    std::cout << "\nAvailable generators:\n";
     for (const auto generator_names = Generator::GetGeneratorNames(); const auto &generator_name: generator_names) {
         std::cout << "- \"" << generator_name << "\"\n";
     }

@@ -4,6 +4,10 @@
 /* external includes */
 #include <stdexcept>
 
+const char *Generator::GeneratorNames[kMaxNumGenerators]{};
+GeneratorFuncT Generator::GeneratorFuncs[kMaxNumGenerators]{};
+size_t Generator::NumGenerators{};
+
 BinSequencePack Generator::GenerateData(const char *generator_name) {
     for (size_t idx = 0; idx < NumGenerators; ++idx) {
         if (GeneratorNames[idx] == generator_name) {

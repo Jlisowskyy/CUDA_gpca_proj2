@@ -23,7 +23,7 @@ class ArgParser {
 public:
     ArgParser(int argc, char **argv);
 
-    ~ArgParser();
+    ~ArgParser() = default;
 
     // ------------------------------
     // class methods
@@ -37,7 +37,6 @@ public:
     // Protected methods
     // ------------------------------
 protected:
-
     void ProcessArgs_(ArgPack &arg_pack);
 
     // ------------------------------
