@@ -32,6 +32,6 @@ void Dispatcher::Dispatch() const {
         assert(arg_pack_.test_name != nullptr);
 
         Tester tester{};
-        tester.RunTest(arg_pack_.test_name, data_parser.ParseData(arg_pack_.filename));
+        tester.RunTests(arg_pack_.test_names, data_parser.ParseData(arg_pack_.filename));
     }
 }

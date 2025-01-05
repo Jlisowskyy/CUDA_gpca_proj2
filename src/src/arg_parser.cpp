@@ -37,7 +37,7 @@ ArgPack ArgParser::ParseArgs() {
 
 void ArgParser::PrintHelp() {
     std::cout << "Usage:\n"
-            "<filename> [-g [generator_name]] [-t <test_name>]\n"
+            "<filename> [-g [generator_name]] [-t <test_name> ...]\n"
             "where:\n"
             "- \"filename\" is the name of the file to be processed or saved to\n"
             "- \"-g\" is an optional flag to generate data\n"
@@ -78,8 +78,13 @@ void ArgParser::ParseTestFlag_(ArgPack &arg_pack) {
         throw std::runtime_error("Missing test name");
     }
 
-    const char *test_name = argv_[cur_++];
-    arg_pack.test_name = test_name;
+    while (cur_ < static_cast<size_t>(argc_) && argv_[cur_][0] != '-') {
+        arg_pack.test_names.emplace_back(argv_[cur_++]);
+    }
+
+    if (arg_pack.test_names.empty()) {
+        throw std::runtime_error("Missing test name");
+    }
 }
 
 void ArgParser::ParseGeneratorFlag_(ArgPack &arg_pack) {

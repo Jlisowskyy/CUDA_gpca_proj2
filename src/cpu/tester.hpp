@@ -8,9 +8,9 @@
 #include <vector>
 #include <string>
 
-using TestFuncT = void (*)(const BinSequencePack& bin_sequence_pack);
-
 class Tester {
+    using TestFuncT = void (Tester::*)(const BinSequencePack &bin_sequence_pack);
+
     // ------------------------------
     // Class creation
     // ------------------------------
@@ -23,7 +23,7 @@ public:
     // class methods
     // ------------------------------
 
-    void RunTest(const char *test_name, const BinSequencePack& bin_sequence_pack);
+    void RunTests(const std::vector<const char *> &test_names, const BinSequencePack &bin_sequence_pack);
 
     static std::vector<std::string> GetTestNames();
 
@@ -31,6 +31,19 @@ public:
     // Protected methods
     // ------------------------------
 protected:
+    void TestCpuSingleNaive_(const BinSequencePack &bin_sequence_pack);
+
+    void TestCpuNaive_(const BinSequencePack &bin_sequence_pack);
+
+    void TestCpuSingleTrie_(const BinSequencePack &bin_sequence_pack);
+
+    void TestCpuTrie_(const BinSequencePack &bin_sequence_pack);
+
+    void TestGPU_(const BinSequencePack &bin_sequence_pack);
+
+    void RunTest_(const char* test_name, const BinSequencePack &bin_sequence_pack);
+
+
     // ------------------------------
     // class fields
     // ------------------------------

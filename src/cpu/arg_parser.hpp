@@ -6,13 +6,14 @@
 /* external includes */
 #include <unordered_map>
 #include <string>
+#include <vector>
 
 struct ArgPack {
     const char *filename;
     bool gen_data;
     const char *generator_name;
     bool run_tests;
-    const char *test_name;
+    std::vector<const char*> test_names;
 };
 
 class ArgParser {
