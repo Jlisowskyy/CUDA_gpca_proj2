@@ -42,6 +42,10 @@ protected:
 
     [[nodiscard]] BinSequencePack GenerateRandomData();
 
+    [[nodiscard]] BinSequencePack GenerateEnsureSolution();
+
+    [[nodiscard]] BinSequencePack GeneratedFixed();
+
     // ------------------------------
     // class fields
     // ------------------------------

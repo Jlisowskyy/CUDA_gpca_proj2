@@ -8,15 +8,11 @@
 #include <mutex>
 
 void CalculateHammingDistancesSingleThreadNaive(const std::vector<BinSequence> &sequences,
-                                                const size_t sequence_idx,
+                                                const size_t offset,
                                                 std::vector<std::pair<size_t, size_t> > &out) {
-    const auto &sequence = sequences[sequence_idx];
+    const auto &sequence = sequences[offset];
 
-    for (size_t idx = 0; idx < sequences.size(); ++idx) {
-        if (idx == sequence_idx) {
-            continue;
-        }
-
+    for (size_t idx = offset + 1; idx < sequences.size(); ++idx) {
         const auto &other_sequence = sequences[idx];
         size_t distance = std::abs(
             static_cast<int64_t>(other_sequence.GetSizeBits()) - static_cast<int64_t>(sequence.GetSizeBits()));
@@ -37,13 +33,13 @@ void CalculateHammingDistancesSingleThreadNaive(const std::vector<BinSequence> &
         }
 
         if (distance == 1) {
-            out.emplace_back(idx, distance);
+            out.emplace_back(idx, offset);
         }
     }
 }
 
 void CalculateHammingDistancesSingleThreadTrie(const std::vector<BinSequence> &sequences,
-                                               size_t sequence_idx,
+                                               const size_t offset,
                                                std::vector<std::pair<size_t, size_t> > &out) {
     throw std::runtime_error("Not implemented");
 }

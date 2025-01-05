@@ -9,25 +9,32 @@
 #include <iostream>
 #include <mutex>
 #include <random>
-
+#include <set>
+#include <cstring>
 
 const char *Generator::GeneratorNames[kMaxNumGenerators]{
-    "random_gen"
+    "random_gen",
+    "ensure_sol",
+    "fixed",
 };
 
 Generator::GeneratorFuncT Generator::GeneratorFuncs[kMaxNumGenerators]{
-    &Generator::GenerateRandomData
+    &Generator::GenerateRandomData,
+    &Generator::GenerateEnsureSolution,
+    &Generator::GeneratedFixed,
 };
 
-size_t Generator::NumGenerators = 1;
+size_t Generator::NumGenerators = 3;
 
 BinSequencePack Generator::GenerateData(const char *generator_name) {
     for (size_t idx = 0; idx < NumGenerators; ++idx) {
         if (std::string(GeneratorNames[idx]) == std::string(generator_name)) {
             const auto generator_func = GeneratorFuncs[idx];
 
+            std::cout << "Generating sequences..." << std::endl;
             BinSequencePack data = (this->*generator_func)();
 
+            std::cout << "Solving generated sequences..." << std::endl;
             data.solution.reserve(data.sequences.size());
             CalculateHammingDistancesNaive(data);
             data.solution.shrink_to_fit();
@@ -115,4 +122,70 @@ BinSequencePack Generator::GenerateRandomData() {
     pool.Wait();
 
     return out;
+}
+
+BinSequencePack Generator::GenerateEnsureSolution() {
+    auto data = GenerateRandomData();
+
+    std::cout << "Provide minimal number of solutions to generate: " << std::endl;
+    size_t min_solutions;
+    std::cin >> min_solutions;
+
+    std::set<size_t> used{};
+    std::mt19937_64 gen(std::random_device{}());
+
+    while (min_solutions > 0) {
+        size_t left = gen() % data.sequences.size();
+        const size_t right = gen() % data.sequences.size();
+
+        if (left == right) {
+            continue;
+        }
+
+        if (used.contains(left) && used.contains(right)) {
+            continue;
+        }
+
+        if (used.contains(left) || used.contains(right)) {
+            left = used.contains(left) ? right : left;
+        }
+
+        used.insert(left);
+        used.insert(right);
+        --min_solutions;
+
+        data.sequences[left] = data.sequences[right];
+
+        const size_t random_bit = gen() % data.sequences[left].GetSizeBits();
+        data.sequences[left].SetBit(random_bit, !data.sequences[left].GetBit(random_bit));
+    }
+
+    return data;
+}
+
+BinSequencePack Generator::GeneratedFixed() {
+    static constexpr const char *kFixedSequence[]{
+        "1000111110",
+        "1100111110",
+        "1010111110",
+        "1001111110",
+        "1000111010",
+        "1001101100",
+        "1001100110",
+    };
+
+    BinSequencePack data{};
+    data.sequences.reserve(std::size(kFixedSequence));
+
+    for (const char *seq: kFixedSequence) {
+        const size_t len = std::strlen(seq);
+        data.sequences.emplace_back(len);
+        auto &sequence = data.sequences.back();
+
+        for (size_t idx = 0; idx < len; ++idx) {
+            sequence.SetBit(idx, seq[idx] == '1');
+        }
+    }
+
+    return data;
 }
