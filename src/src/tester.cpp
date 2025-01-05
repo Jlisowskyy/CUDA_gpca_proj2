@@ -1,9 +1,12 @@
 /* internal includes */
 #include <tester.hpp>
+#include <hamming.hpp>
 
 /* external includes */
 #include <stdexcept>
 #include <iostream>
+#include <chrono>
+#include <set>
 
 const char *Tester::TestNames[kMaxNumTests]{
     "cpu_single_naive",
@@ -40,19 +43,49 @@ std::vector<std::string> Tester::GetTestNames() {
 }
 
 void Tester::TestCpuSingleNaive_(const BinSequencePack &bin_sequence_pack) {
-    std::cout << "TestCpuSingleNaive" << std::endl;
+    std::cout << "TestCpuSingleNaive:" << std::endl;
+
+    std::vector<std::pair<size_t, size_t> > out{};
+
+    const auto start = std::chrono::high_resolution_clock::now();
+
+    for (size_t idx = 0; idx < bin_sequence_pack.sequences.size(); ++idx) {
+        CalculateHammingDistancesSingleThreadNaive(bin_sequence_pack.sequences, idx, out);
+    }
+
+    const auto end = std::chrono::high_resolution_clock::now();
+
+    const double timeMs = std::chrono::duration<double, std::milli>(end - start).count();
+    std::cout << "Total time spent: " << timeMs << "ms" << std::endl;
+    std::cout << "Average time spent on a single sequence: " << timeMs / bin_sequence_pack.sequences.size() << "ms" <<
+            std::endl;
+
+    VerifySolution_(bin_sequence_pack, out);
 }
 
 void Tester::TestCpuNaive_(const BinSequencePack &bin_sequence_pack) {
-    std::cout << "TestCpuNaive" << std::endl;
+    std::cout << "TestCpuNaive:" << std::endl;
+
+    std::vector<std::pair<size_t, size_t> > out{};
+
+    const auto start = std::chrono::high_resolution_clock::now();
+    CalculateHammingDistancesNaive(bin_sequence_pack.sequences, out);
+    const auto end = std::chrono::high_resolution_clock::now();
+
+    const double timeMs = std::chrono::duration<double, std::milli>(end - start).count();
+    std::cout << "Total time spent: " << timeMs << "ms" << std::endl;
+    std::cout << "Average time spent on a single sequence: " << timeMs / bin_sequence_pack.sequences.size() << "ms" <<
+            std::endl;
+
+    VerifySolution_(bin_sequence_pack, out);
 }
 
 void Tester::TestCpuSingleTrie_(const BinSequencePack &bin_sequence_pack) {
-    std::cout << "TestCpuSingleTrie" << std::endl;
+    std::cout << "TestCpuSingleTrie:" << std::endl;
 }
 
 void Tester::TestCpuTrie_(const BinSequencePack &bin_sequence_pack) {
-    std::cout << "TestCpuTrie" << std::endl;
+    std::cout << "TestCpuTrie:" << std::endl;
 }
 
 void Tester::TestGPU_(const BinSequencePack &bin_sequence_pack) {
@@ -70,4 +103,27 @@ void Tester::RunTest_(const char *test_name, const BinSequencePack &bin_sequence
     }
 
     throw std::runtime_error("Test not found");
+}
+
+void Tester::VerifySolution_(const BinSequencePack &bin_sequence_pack,
+                             const std::vector<std::pair<size_t, size_t> > &out) {
+    std::set<std::pair<size_t, size_t> > correct_set{
+        bin_sequence_pack.solution.begin(), bin_sequence_pack.solution.end()
+    };
+
+    for (const auto &pair: out) {
+        if (correct_set.contains(pair)) {
+            correct_set.erase(pair);
+        } else if (correct_set.contains({pair.second, pair.first})) {
+            correct_set.erase({pair.second, pair.first});
+        } else {
+            std::cout << "[ERROR] Generated additional pair: " << pair.first << " " << pair.second << std::endl;
+        }
+    }
+
+    if (!correct_set.empty()) {
+        for (const auto &pair: correct_set) {
+            std::cout << "[ERROR] Missed pair: " << pair.first << " " << pair.second << std::endl;
+        }
+    }
 }

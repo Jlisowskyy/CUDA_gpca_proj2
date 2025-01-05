@@ -36,7 +36,7 @@ BinSequencePack Generator::GenerateData(const char *generator_name) {
 
             std::cout << "Solving generated sequences..." << std::endl;
             data.solution.reserve(data.sequences.size());
-            CalculateHammingDistancesNaive(data);
+            CalculateHammingDistancesNaive(data.sequences, data.solution);
             data.solution.shrink_to_fit();
 
             return data;

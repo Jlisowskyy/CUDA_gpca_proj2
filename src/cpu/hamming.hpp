@@ -11,8 +11,10 @@ void CalculateHammingDistancesSingleThreadTrie(const std::vector<BinSequence> &s
                                                size_t offset,
                                                std::vector<std::pair<size_t, size_t> > &out);
 
-void CalculateHammingDistancesNaive(BinSequencePack &data);
+void CalculateHammingDistancesNaive(const std::vector<BinSequence> &sequences,
+                                    std::vector<std::pair<size_t, size_t> > &out);
 
-void CalculateHammingDistancesTrie(BinSequencePack &data);
+void CalculateHammingDistancesTrie(const std::vector<BinSequence> &sequences,
+                                   std::vector<std::pair<size_t, size_t> > &out);
 
 #endif //HAMMING_HPP

@@ -44,27 +44,29 @@ void CalculateHammingDistancesSingleThreadTrie(const std::vector<BinSequence> &s
     throw std::runtime_error("Not implemented");
 }
 
-void CalculateHammingDistancesNaive(BinSequencePack &data) {
+void CalculateHammingDistancesNaive(const std::vector<BinSequence> &sequences,
+                                    std::vector<std::pair<size_t, size_t> > &out) {
     ThreadPool thread_pool(std::thread::hardware_concurrency());
 
     std::mutex m{};
-    thread_pool.RunThreads([&data, &m](const uint32_t idx) {
+    thread_pool.RunThreads([&sequences, &out, &m](const uint32_t idx) {
         const size_t num_threads = std::thread::hardware_concurrency();
-        std::vector<std::pair<size_t, size_t> > out{};
+        std::vector<std::pair<size_t, size_t> > pairs{};
 
-        for (size_t seq_idx = idx; seq_idx < data.sequences.size(); seq_idx += num_threads) {
-            CalculateHammingDistancesSingleThreadNaive(data.sequences, seq_idx, out);
+        for (size_t seq_idx = idx; seq_idx < sequences.size(); seq_idx += num_threads) {
+            CalculateHammingDistancesSingleThreadNaive(sequences, seq_idx, pairs);
         }
 
         m.lock();
-        for (const auto &pair: out) {
-            data.solution.emplace_back(pair);
+        for (const auto &pair: pairs) {
+            out.emplace_back(pair);
         }
         m.unlock();
     });
     thread_pool.Wait();
 }
 
-void CalculateHammingDistancesTrie(const BinSequencePack &data) {
+void CalculateHammingDistancesTrie(const std::vector<BinSequence> &sequences,
+                                   std::vector<std::pair<size_t, size_t> > &out) {
     throw std::runtime_error("Not implemented");
 }
