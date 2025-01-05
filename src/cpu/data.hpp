@@ -99,9 +99,9 @@ public:
     }
 
 private:
-    size_t size_bits_;
-    size_t size_words_;
-    uint64_t *data_;
+    size_t size_bits_{};
+    size_t size_words_{};
+    uint64_t *data_{};
 };
 
 struct BinSequencePack {

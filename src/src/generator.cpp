@@ -27,7 +27,11 @@ BinSequencePack Generator::GenerateData(const char *generator_name) {
             const auto generator_func = GeneratorFuncs[idx];
 
             BinSequencePack data = (this->*generator_func)();
+
+            data.solution.reserve(data.sequences.size());
             CalculateHammingDistancesNaive(data);
+            data.solution.shrink_to_fit();
+
             return data;
         }
     }
@@ -77,6 +81,7 @@ BinSequencePack Generator::GenerateRandomData() {
     const auto params = GetGeneratorParams();
 
     BinSequencePack out{};
+    out.sequences.reserve(params.num_sequences);
 
     std::mutex m{};
     ThreadPool pool(std::thread::hardware_concurrency());
@@ -96,7 +101,9 @@ BinSequencePack Generator::GenerateRandomData() {
                 break;
             }
 
-            auto sequence = out.sequences.emplace_back(seq_length);
+            out.sequences.emplace_back(seq_length);
+            auto &sequence = out.sequences.back();
+            --seq_to_gen;
             m.unlock();
 
             for (size_t bit_idx = 0; bit_idx < seq_length; ++bit_idx) {

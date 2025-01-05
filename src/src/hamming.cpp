@@ -36,7 +36,9 @@ void CalculateHammingDistancesSingleThreadNaive(const std::vector<BinSequence> &
             }
         }
 
-        out.emplace_back(idx, distance);
+        if (distance == 1) {
+            out.emplace_back(idx, distance);
+        }
     }
 }
 

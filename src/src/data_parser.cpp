@@ -53,7 +53,7 @@ BinSequencePack DataParser::ParseData(const char *path) const {
 }
 
 void DataParser::SaveData(const BinSequencePack &data, const char *path) const {
-    std::ofstream outputFile(path);
+    std::ofstream outputFile(path, std::ios::trunc);
 
     if (!outputFile.is_open()) {
         throw std::runtime_error("Failed to open file");
@@ -78,7 +78,8 @@ void DataParser::ParseSequence_(const std::string &line, BinSequencePack &data) 
         throw std::runtime_error("Sequence is too short");
     }
 
-    auto sequence = data.sequences.emplace_back(line.length());
+    data.sequences.emplace_back(line.length());
+    auto &sequence = data.sequences.back();
 
     size_t cursor = 0;
     for (const char c: line) {
