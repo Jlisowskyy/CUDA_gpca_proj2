@@ -45,47 +45,47 @@ std::vector<std::string> Tester::GetTestNames() {
 void Tester::TestCpuSingleNaive_(const BinSequencePack &bin_sequence_pack) {
     std::cout << "TestCpuSingleNaive:" << std::endl;
 
-    std::vector<std::pair<size_t, size_t> > out{};
-
-    const auto start = std::chrono::high_resolution_clock::now();
-
-    for (size_t idx = 0; idx < bin_sequence_pack.sequences.size(); ++idx) {
-        CalculateHammingDistancesSingleThreadNaive(bin_sequence_pack.sequences, idx, out);
-    }
-
-    const auto end = std::chrono::high_resolution_clock::now();
-
-    const double timeMs = std::chrono::duration<double, std::milli>(end - start).count();
-    std::cout << "Total time spent: " << timeMs << "ms" << std::endl;
-    std::cout << "Average time spent on a single sequence: " << timeMs / bin_sequence_pack.sequences.size() << "ms" <<
-            std::endl;
-
-    VerifySolution_(bin_sequence_pack, out);
+    ProcessSingleTest_(
+        bin_sequence_pack,
+        [](const BinSequencePack &bin_sequence_pack, std::vector<std::pair<size_t, size_t> > &out) {
+            for (size_t idx = 0; idx < bin_sequence_pack.sequences.size(); ++idx) {
+                CalculateHammingDistancesSingleThreadNaive(bin_sequence_pack.sequences, idx, out);
+            }
+        }
+    );
 }
 
 void Tester::TestCpuNaive_(const BinSequencePack &bin_sequence_pack) {
     std::cout << "TestCpuNaive:" << std::endl;
 
-    std::vector<std::pair<size_t, size_t> > out{};
-
-    const auto start = std::chrono::high_resolution_clock::now();
-    CalculateHammingDistancesNaive(bin_sequence_pack.sequences, out);
-    const auto end = std::chrono::high_resolution_clock::now();
-
-    const double timeMs = std::chrono::duration<double, std::milli>(end - start).count();
-    std::cout << "Total time spent: " << timeMs << "ms" << std::endl;
-    std::cout << "Average time spent on a single sequence: " << timeMs / bin_sequence_pack.sequences.size() << "ms" <<
-            std::endl;
-
-    VerifySolution_(bin_sequence_pack, out);
+    ProcessSingleTest_(
+        bin_sequence_pack,
+        [](const BinSequencePack &bin_sequence_pack, std::vector<std::pair<size_t, size_t> > &out) {
+            CalculateHammingDistancesNaive(bin_sequence_pack.sequences, out);
+        }
+    );
 }
 
 void Tester::TestCpuSingleTrie_(const BinSequencePack &bin_sequence_pack) {
     std::cout << "TestCpuSingleTrie:" << std::endl;
+
+    ProcessSingleTest_(
+        bin_sequence_pack,
+        [](const BinSequencePack &bin_sequence_pack, std::vector<std::pair<size_t, size_t> > &out) {
+            CalculateHammingDistancesSingleThreadTrie(bin_sequence_pack.sequences, out);
+        }
+    );
 }
 
 void Tester::TestCpuTrie_(const BinSequencePack &bin_sequence_pack) {
     std::cout << "TestCpuTrie:" << std::endl;
+
+    ProcessSingleTest_(
+        bin_sequence_pack,
+        [](const BinSequencePack &bin_sequence_pack, std::vector<std::pair<size_t, size_t> > &out) {
+            CalculateHammingDistancesTrie(bin_sequence_pack.sequences, out);
+        }
+    );
 }
 
 void Tester::TestGPU_(const BinSequencePack &bin_sequence_pack) {
@@ -122,8 +122,8 @@ void Tester::VerifySolution_(const BinSequencePack &bin_sequence_pack,
     }
 
     if (!correct_set.empty()) {
-        for (const auto &pair: correct_set) {
-            std::cout << "[ERROR] Missed pair: " << pair.first << " " << pair.second << std::endl;
+        for (const auto &[fst, snd]: correct_set) {
+            std::cout << "[ERROR] Missed pair: " << fst << " " << snd << std::endl;
         }
     }
 }

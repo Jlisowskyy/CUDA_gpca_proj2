@@ -7,6 +7,8 @@
 /* external includes */
 #include <vector>
 #include <string>
+#include <iostream>
+#include <chrono>
 
 class Tester {
     using TestFuncT = void (Tester::*)(const BinSequencePack &bin_sequence_pack);
@@ -41,9 +43,28 @@ protected:
 
     void TestGPU_(const BinSequencePack &bin_sequence_pack);
 
-    void RunTest_(const char* test_name, const BinSequencePack &bin_sequence_pack);
+    void RunTest_(const char *test_name, const BinSequencePack &bin_sequence_pack);
 
     void VerifySolution_(const BinSequencePack &bin_sequence_pack, const std::vector<std::pair<size_t, size_t> > &out);
+
+    template<class FuncT>
+    void ProcessSingleTest_(const BinSequencePack &bin_sequence_pack, FuncT test_func) {
+        std::vector<std::pair<size_t, size_t> > out{};
+
+        const auto start = std::chrono::high_resolution_clock::now();
+
+       test_func(bin_sequence_pack, out);
+
+        const auto end = std::chrono::high_resolution_clock::now();
+
+        const double timeMs = std::chrono::duration<double, std::milli>(end - start).count();
+        std::cout << "Total time spent: " << timeMs << "ms" << std::endl;
+        std::cout << "Average time spent on a single sequence: " << timeMs / bin_sequence_pack.sequences.size() << "ms"
+                <<
+                std::endl;
+
+        // VerifySolution_(bin_sequence_pack, out);
+    }
 
     // ------------------------------
     // class fields

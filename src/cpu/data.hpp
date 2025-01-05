@@ -98,6 +98,15 @@ public:
         return data_[idx];
     }
 
+    [[nodiscard]] bool Compare(const BinSequence &sequence, const size_t bit_idx = 0) const {
+        for (size_t idx = bit_idx; idx < size_bits_; ++idx) {
+            if (GetBit(idx) != sequence.GetBit(idx)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
 private:
     size_t size_bits_{};
     size_t size_words_{};

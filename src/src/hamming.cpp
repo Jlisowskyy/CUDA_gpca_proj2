@@ -1,11 +1,17 @@
 /* internal includes */
 #include <hamming.hpp>
 #include <thread_pool.hpp>
+#include <trie.hpp>
 
 /* external includes */
 #include <stdexcept>
 #include <thread>
 #include <mutex>
+#include <iostream>
+
+// ------------------------------
+// Naive solution
+// ------------------------------
 
 void CalculateHammingDistancesSingleThreadNaive(const std::vector<BinSequence> &sequences,
                                                 const size_t offset,
@@ -38,12 +44,6 @@ void CalculateHammingDistancesSingleThreadNaive(const std::vector<BinSequence> &
     }
 }
 
-void CalculateHammingDistancesSingleThreadTrie(const std::vector<BinSequence> &sequences,
-                                               const size_t offset,
-                                               std::vector<std::pair<size_t, size_t> > &out) {
-    throw std::runtime_error("Not implemented");
-}
-
 void CalculateHammingDistancesNaive(const std::vector<BinSequence> &sequences,
                                     std::vector<std::pair<size_t, size_t> > &out) {
     ThreadPool thread_pool(std::thread::hardware_concurrency());
@@ -66,7 +66,38 @@ void CalculateHammingDistancesNaive(const std::vector<BinSequence> &sequences,
     thread_pool.Wait();
 }
 
+// ------------------------------
+// Trie solution
+// ------------------------------
+
+
+void CalculateHammingDistancesSingleThreadTrie(const std::vector<BinSequence> &sequences,
+                                               std::vector<std::pair<size_t, size_t> > &out) {
+    Trie trie(sequences);
+
+    BuildTrieSingleThread(trie, sequences);
+    std::cout << "Total tree size in MB " << trie.GetSizeMB() << std::endl;
+
+    for (size_t idx = 0; idx < sequences.size(); ++idx) {
+        trie.FindPairs(idx, out);
+    }
+}
+
 void CalculateHammingDistancesTrie(const std::vector<BinSequence> &sequences,
                                    std::vector<std::pair<size_t, size_t> > &out) {
-    throw std::runtime_error("Not implemented");
+    Trie trie(sequences);
+
+    BuildTrieParallel(trie, sequences);
+    std::cout << "Total tree size in MB " << trie.GetSizeMB() << std::endl;
+
+    ThreadPool thread_pool(std::thread::hardware_concurrency());
+    thread_pool.RunThreads([&trie, &out, &sequences](const uint32_t idx) {
+        const size_t num_threads = std::thread::hardware_concurrency();
+
+        for (size_t seq_idx = idx; seq_idx < sequences.size(); seq_idx += num_threads) {
+            trie.FindPairs(seq_idx, out);
+        }
+    });
+
+    thread_pool.Wait();
 }
