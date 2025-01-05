@@ -11,11 +11,52 @@ class BinSequence {
 public:
     explicit BinSequence(const size_t size_bits) : size_bits_(size_bits) {
         size_words_ = (size_bits + 63) / 64;
-        data_ = new uint64_t[size_words_];
+        data_ = new uint64_t[size_words_]();
+    }
+
+    BinSequence(const BinSequence &other)
+        : size_bits_(other.size_bits_)
+          , size_words_(other.size_words_)
+          , data_(new uint64_t[other.size_words_]) {
+        std::copy(other.data_, other.data_ + size_words_, data_);
+    }
+
+    BinSequence(BinSequence &&other) noexcept
+        : size_bits_(other.size_bits_)
+          , size_words_(other.size_words_)
+          , data_(other.data_) {
+        other.data_ = nullptr;
+        other.size_bits_ = 0;
+        other.size_words_ = 0;
+    }
+
+    BinSequence &operator=(const BinSequence &other) {
+        if (this != &other) {
+            BinSequence temp(other);
+            std::swap(size_bits_, temp.size_bits_);
+            std::swap(size_words_, temp.size_words_);
+            std::swap(data_, temp.data_);
+        }
+        return *this;
+    }
+
+    BinSequence &operator=(BinSequence &&other) noexcept {
+        if (this != &other) {
+            delete[] data_;
+
+            size_bits_ = other.size_bits_;
+            size_words_ = other.size_words_;
+            data_ = other.data_;
+
+            other.data_ = nullptr;
+            other.size_bits_ = 0;
+            other.size_words_ = 0;
+        }
+        return *this;
     }
 
     ~BinSequence() {
-        delete [] data_;
+        delete[] data_;
     }
 
     [[nodiscard]] size_t GetSizeBits() const {
@@ -57,7 +98,7 @@ public:
         return data_[idx];
     }
 
-protected:
+private:
     size_t size_bits_;
     size_t size_words_;
     uint64_t *data_;

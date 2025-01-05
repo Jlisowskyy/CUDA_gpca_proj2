@@ -44,10 +44,6 @@ BinSequencePack DataParser::ParseData(const char *path) const {
             std::string("Failed to parse line ") + std::to_string(line_counter) + ": " + e.what());
     }
 
-    if (data.sequences.size() != data.solution.size()) {
-        throw std::runtime_error("Number of sequences and solutions do not match");
-    }
-
     if (data.sequences.size() < kMinNumSequences) {
         throw std::runtime_error(
             "Number of sequences is too low. Expected minimum: " + std::to_string(kMinNumSequences));

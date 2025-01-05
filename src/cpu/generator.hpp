@@ -8,9 +8,15 @@
 #include <string>
 #include <vector>
 
-using GeneratorFuncT = BinSequencePack (*)();
-
 class Generator {
+    using GeneratorFuncT = BinSequencePack (Generator::*)();
+
+    struct GeneratorParams {
+        uint32_t min_length;
+        uint32_t max_length;
+        uint32_t num_sequences;
+    };
+
     // ------------------------------
     // Class creation
     // ------------------------------
@@ -30,9 +36,12 @@ public:
     // ------------------------------
     // Protected methods
     // ------------------------------
-
-
 protected:
+
+    [[nodiscard]] static GeneratorParams GetGeneratorParams();
+
+    [[nodiscard]] BinSequencePack GenerateRandomData();
+
     // ------------------------------
     // class fields
     // ------------------------------

@@ -13,6 +13,7 @@ static void main_(const int argc, char **argv) {
         const Dispatcher dispatcher(arg_pack);
         dispatcher.Dispatch();
     } catch (const std::exception &e) {
+        std::cerr << "Failed to dispatch: " << e.what() << std::endl;
         ArgParser::PrintHelp();
     }
 }
