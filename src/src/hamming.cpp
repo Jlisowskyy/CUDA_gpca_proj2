@@ -86,18 +86,25 @@ void CalculateHammingDistancesSingleThreadTrie(const std::vector<BinSequence> &s
 void CalculateHammingDistancesTrie(const std::vector<BinSequence> &sequences,
                                    std::vector<std::pair<size_t, size_t> > &out) {
     Trie trie(sequences);
+    std::vector<std::vector<std::pair<size_t, size_t> > > thread_out(std::thread::hardware_concurrency());
 
     BuildTrieParallel(trie, sequences);
     std::cout << "Total tree size in MB " << trie.GetSizeMB() << std::endl;
 
     ThreadPool thread_pool(std::thread::hardware_concurrency());
-    thread_pool.RunThreads([&trie, &out, &sequences](const uint32_t idx) {
+    thread_pool.RunThreads([&trie, &out, &sequences, &thread_out](const uint32_t idx) {
         const size_t num_threads = std::thread::hardware_concurrency();
 
         for (size_t seq_idx = idx; seq_idx < sequences.size(); seq_idx += num_threads) {
-            trie.FindPairs(seq_idx, out);
+            trie.FindPairs(seq_idx, thread_out[idx]);
         }
     });
 
     thread_pool.Wait();
+
+    for (auto &thread_pair: thread_out) {
+        for (const auto &pair: thread_pair) {
+            out.emplace_back(pair);
+        }
+    }
 }

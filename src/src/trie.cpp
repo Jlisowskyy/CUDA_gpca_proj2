@@ -111,39 +111,49 @@ static std::string GetDotNodeLabel(const BinSequence &sequence) {
 }
 
 void Trie::FindPairs(const uint32_t idx, std::vector<std::pair<size_t, size_t> > &out) {
-    auto sequence = (*_sequences)[idx];
+    const BinSequence &sequence = (*_sequences)[idx];
     size_t bit_idx = 0;
 
     Node_ *p = _root;
     while (p && (p->next[0] || p->next[1])) {
         const bool value = sequence.GetBit(bit_idx++);
 
+        // Try path with flipped bit
         _tryToFindPair(p->next[!value], idx, bit_idx, out);
+
+        // Continue on main path
         p = p->next[value];
     }
 
-    if (!(p && p->idx == idx)) {
+    // Validate we found our sequence
+    if (p && p->idx != idx) {
         assert(sequence.Compare((*_sequences)[p->idx]));
     }
 }
 
 void Trie::_tryToFindPair(Node_ *p, const uint32_t idx, uint32_t bit_idx,
                           std::vector<std::pair<size_t, size_t> > &out) {
+    /* Check if we have a valid node */
     if (!p) {
         return;
     }
 
+    /*  Use original sequence to follow path after the flipped bit */
     const BinSequence &sequence = (*_sequences)[idx];
 
+    /* Follow the path */
     while (p && (p->next[0] || p->next[1])) {
         p = p->next[sequence.GetBit(bit_idx++)];
     }
 
+    /* Check if we found a valid sequence */
     if (!p) {
         return;
     }
 
-    if (const BinSequence &other_sequence = (*_sequences)[p->idx]; sequence.Compare(other_sequence, bit_idx)) {
+    /* Check if remaining bits match after the single flip */
+    if (const BinSequence &other_sequence = (*_sequences)[p->idx];
+        idx < p->idx && sequence.Compare(other_sequence, bit_idx)) {
         out.emplace_back(p->idx, idx);
     }
 }
@@ -209,7 +219,7 @@ void Trie::DumpToDot(const std::string &filename) const {
         }
 
         if (!(node->next[0] || node->next[1]) || node->idx != 0) {
-            out << "label=\""  << GetDotNodeLabel((*_sequences)[node->idx]) << ", " << node->idx << "\"";
+            out << "label=\"" << GetDotNodeLabel((*_sequences)[node->idx]) << ", " << node->idx << "\"";
         } else {
             out << "label=\"\"";
         }
