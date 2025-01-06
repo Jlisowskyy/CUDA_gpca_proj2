@@ -115,20 +115,44 @@ void Trie::FindPairs(const uint32_t idx, std::vector<std::pair<size_t, size_t> >
     size_t bit_idx = 0;
 
     Node_ *p = _root;
-    while (p && (p->next[0] || p->next[1])) {
+    /* follow the path */
+    while (p && (p->next[0] || p->next[1]) && bit_idx < sequence.GetSizeBits()) {
         const bool value = sequence.GetBit(bit_idx++);
 
-        // Try path with flipped bit
+        /* Try path with flipped bit */
         _tryToFindPair(p->next[!value], idx, bit_idx, out);
 
-        // Continue on main path
+        if (bit_idx == sequence.GetSizeBits() && p->idx != UINT32_MAX && idx < p->idx) {
+            /* check if there is some shorter sequence that is a valid pair */
+            out.emplace_back(p->idx, idx);
+        }
+
+        /* Continue on main path */
         p = p->next[value];
     }
 
-    // Validate we found our sequence
-    if (p && p->idx != idx) {
-        assert(sequence.Compare((*_sequences)[p->idx]));
+    if (!p) {
+        /* nothing to do */
+        return;
     }
+
+    /* we used all bits from the sequence */
+    if (bit_idx == sequence.GetSizeBits()) {
+        /* add child if are valid pair */
+
+        if (p->next[0] && p->next[0]->idx != UINT32_MAX && idx < p->next[0]->idx) {
+            out.emplace_back(p->next[0]->idx, idx);
+        }
+
+        if (p->next[1] && p->next[1]->idx != UINT32_MAX && idx < p->next[1]->idx) {
+            out.emplace_back(p->next[1]->idx, idx);
+        }
+
+        return;
+    }
+
+    /* Validate we found our sequence */
+    assert((p && p->idx == idx) || sequence.Compare((*_sequences)[p->idx]));
 }
 
 void Trie::_tryToFindPair(Node_ *p, const uint32_t idx, uint32_t bit_idx,
@@ -142,7 +166,7 @@ void Trie::_tryToFindPair(Node_ *p, const uint32_t idx, uint32_t bit_idx,
     const BinSequence &sequence = (*_sequences)[idx];
 
     /* Follow the path */
-    while (p && (p->next[0] || p->next[1])) {
+    while (p && (p->next[0] || p->next[1]) && bit_idx < sequence.GetSizeBits()) {
         p = p->next[sequence.GetBit(bit_idx++)];
     }
 
@@ -159,6 +183,9 @@ void Trie::_tryToFindPair(Node_ *p, const uint32_t idx, uint32_t bit_idx,
 }
 
 void Trie::MergeTriesByPrefix(std::vector<Trie> &tries, const size_t prefix_size) {
+    /* TODO: does not work when prefix is longer than some sequences */
+    /* TODO: ExtractBit */
+
     static const auto ExtractBit = [](const size_t item, const size_t idx) {
         return (item >> idx) & 1;
     };
