@@ -75,7 +75,7 @@ class Trie {
         }
 
         Node_ *next[NextCount]{};
-        uint32_t idx{};
+        uint32_t idx{UINT32_MAX};
     };
 
     // ------------------------------

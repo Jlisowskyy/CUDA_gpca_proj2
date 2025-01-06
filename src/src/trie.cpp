@@ -246,29 +246,48 @@ bool Trie::_insert(const uint32_t idx, const uint32_t start_bit_idx) {
     const BinSequence &sequence = (*_sequences)[idx];
     Node_ **p = &_root;
 
-    size_t bit_idx = start_bit_idx;
-    while (*p && ((*p)->next[0] || (*p)->next[1])) {
-        p = &((*p)->next[sequence.GetBit(bit_idx++)]);
-    }
-
-    if (*p && sequence.Compare((*_sequences)[(*p)->idx], bit_idx)) {
+    if (start_bit_idx >= sequence.GetSizeBits()) {
         return false;
     }
 
+    size_t bit_idx = start_bit_idx;
+    /* traverse existing tree or until we reach the end of the sequence */
+    while (*p && ((*p)->next[0] || (*p)->next[1]) && bit_idx < sequence.GetSizeBits()) {
+        p = &((*p)->next[sequence.GetBit(bit_idx++)]);
+    }
+
     if (!*p) {
+        /* we reached the end of the tree */
         *p = new Node_(idx);
         return true;
     }
 
-    // if not perform branching on these one
+    if (bit_idx == sequence.GetSizeBits()) {
+        /* we reached the end of the sequence */
+        /* we are also sure that the p is not null */
+
+        assert((*p)->idx == UINT32_MAX);
+        /* assign the sequence index to the node */
+        (*p)->idx = idx;
+
+        return true;
+    }
+
+    if (*p && sequence.Compare((*_sequences)[(*p)->idx], bit_idx)) {
+        /* we reached leaf node and the sequence is the same -> leave */
+        return false;
+    }
+
+    /* we found node with assigned sequence */
     Node_ *oldNode = *p;
-    Node_ *newNode = new Node_(idx);
     const BinSequence &oldSequence = (*_sequences)[oldNode->idx];
     *p = new Node_{};
 
-    while (oldSequence.GetBit(bit_idx) == sequence.GetBit(bit_idx))
-    // we need to perform another branching
-    {
+    while (bit_idx < oldSequence.GetSizeBits() &&
+           bit_idx < sequence.GetSizeBits() &&
+           oldSequence.GetBit(bit_idx) == sequence.GetBit(bit_idx)) {
+        /* add nodes until we reach the difference or there is no more bits to compare */
+
         Node_ *nNode = new Node_();
         const bool bit = sequence.GetBit(bit_idx++);
 
@@ -276,8 +295,28 @@ bool Trie::_insert(const uint32_t idx, const uint32_t start_bit_idx) {
         p = &((*p)->next[bit]);
     }
 
+    if (bit_idx == oldSequence.GetSizeBits()) {
+        /* we reached the end of the old sequence */
+        (*p)->idx = oldNode->idx;
+        delete oldNode;
+
+        (*p)->next[sequence.GetBit(bit_idx)] = new Node_(idx);
+
+        return true;
+    }
+
+    if (bit_idx == sequence.GetSizeBits()) {
+        /* we reached the end of the new sequence */
+        (*p)->idx = idx;
+        (*p)->next[oldSequence.GetBit(bit_idx)] = oldNode;
+
+        return true;
+    }
+
+    /* we reached the difference */
+    assert(!(bit_idx == oldSequence.GetSizeBits() && bit_idx == sequence.GetSizeBits()));
     (*p)->next[oldSequence.GetBit(bit_idx)] = oldNode;
-    (*p)->next[sequence.GetBit(bit_idx)] = newNode;
+    (*p)->next[sequence.GetBit(bit_idx)] = new Node_(idx);
 
     return true;
 }
