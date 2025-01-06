@@ -2,6 +2,7 @@
 #include <arg_parser.hpp>
 #include <tester.hpp>
 #include <generator.hpp>
+#include <global_conf.hpp>
 
 /* external includes */
 #include <string>
@@ -10,7 +11,8 @@
 
 std::unordered_map<std::string, void (ArgParser::*)(ArgPack &)> ArgParser::flag_parsers_{
     {"-t", &ArgParser::ParseTestFlag_},
-    {"-g", &ArgParser::ParseGeneratorFlag_}
+    {"-g", &ArgParser::ParseGeneratorFlag_},
+    {"-d", &ArgParser::ParseWriteDot},
 };
 
 
@@ -97,4 +99,8 @@ void ArgParser::ParseGeneratorFlag_(ArgPack &arg_pack) {
 
     const char *generator_name = argv_[cur_++];
     arg_pack.generator_name = generator_name;
+}
+
+void ArgParser::ParseWriteDot([[maybe_unused]] ArgPack &arg_pack) {
+    GlobalConfig.WriteDotFiles = true;
 }

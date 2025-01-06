@@ -7,6 +7,7 @@
 #include <iostream>
 #include <chrono>
 #include <set>
+#include <trie.hpp>
 
 const char *Tester::TestNames[kMaxNumTests]{
     "cpu_single_naive",
@@ -14,6 +15,7 @@ const char *Tester::TestNames[kMaxNumTests]{
     "cpu_single_trie",
     "cpu_trie",
     "gpu",
+    "trie_build",
 };
 
 Tester::TestFuncT Tester::TestFuncs[kMaxNumTests]{
@@ -22,9 +24,10 @@ Tester::TestFuncT Tester::TestFuncs[kMaxNumTests]{
     &Tester::TestCpuSingleTrie_,
     &Tester::TestCpuTrie_,
     &Tester::TestGPU_,
+    &Tester::TestTrieBuild_,
 };
 
-size_t Tester::NumTests = 5;
+size_t Tester::NumTests = 6;
 
 void Tester::RunTests(const std::vector<const char *> &test_names, const BinSequencePack &bin_sequence_pack) {
     for (const auto &test_name: test_names) {
@@ -90,6 +93,20 @@ void Tester::TestCpuTrie_(const BinSequencePack &bin_sequence_pack) {
 
 void Tester::TestGPU_(const BinSequencePack &bin_sequence_pack) {
     std::cout << "TestGPU" << std::endl;
+}
+
+void Tester::TestTrieBuild_(const BinSequencePack &bin_sequence_pack) {
+    std::cout << "TestTrieBuild" << std::endl;
+
+    Trie trie1(bin_sequence_pack.sequences);
+    BuildTrieSingleThread(trie1, bin_sequence_pack.sequences);
+
+    Trie trie2(bin_sequence_pack.sequences);
+    BuildTrieParallel(trie2, bin_sequence_pack.sequences);
+
+    if (trie1 != trie2) {
+        std::cout << "[ERROR] Tries are not equal" << std::endl;
+    }
 }
 
 void Tester::RunTest_(const char *test_name, const BinSequencePack &bin_sequence_pack) {

@@ -1,10 +1,15 @@
 /* internal includes */
 #include <trie.hpp>
 #include <thread_pool.hpp>
+#include <global_conf.hpp>
 
 /* external includes */
 #include <iostream>
 #include <barrier>
+#include <fstream>
+#include <queue>
+#include <map>
+#include <string>
 
 template<typename ItemT>
 struct Node {
@@ -96,7 +101,51 @@ protected:
     StabAllocator<Node<ItemT> > *_alloc{};
 };
 
-void Trie::FindPairs(uint32_t idx, std::vector<std::pair<size_t, size_t> > &out) const {
+static std::string GetDotNodeLabel(const BinSequence &sequence) {
+    std::string out{};
+    for (size_t idx = 0; idx < sequence.GetSizeBits(); ++idx) {
+        out += sequence.GetBit(idx) ? "1" : "0";
+    }
+
+    return out;
+}
+
+void Trie::FindPairs(const uint32_t idx, std::vector<std::pair<size_t, size_t> > &out) {
+    auto sequence = (*_sequences)[idx];
+    size_t bit_idx = 0;
+
+    Node_ *p = _root;
+    while (p && (p->next[0] || p->next[1])) {
+        const bool value = sequence.GetBit(bit_idx++);
+
+        _tryToFindPair(p->next[!value], idx, bit_idx, out);
+        p = p->next[value];
+    }
+
+    if (!(p && p->idx == idx)) {
+        assert(sequence.Compare((*_sequences)[p->idx]));
+    }
+}
+
+void Trie::_tryToFindPair(Node_ *p, const uint32_t idx, uint32_t bit_idx,
+                          std::vector<std::pair<size_t, size_t> > &out) {
+    if (!p) {
+        return;
+    }
+
+    const BinSequence &sequence = (*_sequences)[idx];
+
+    while (p && (p->next[0] || p->next[1])) {
+        p = p->next[sequence.GetBit(bit_idx++)];
+    }
+
+    if (!p) {
+        return;
+    }
+
+    if (const BinSequence &other_sequence = (*_sequences)[p->idx]; sequence.Compare(other_sequence, bit_idx)) {
+        out.emplace_back(p->idx, idx);
+    }
 }
 
 void Trie::MergeTriesByPrefix(std::vector<Trie> &tries, const size_t prefix_size) {
@@ -129,6 +178,58 @@ void Trie::MergeTriesByPrefix(std::vector<Trie> &tries, const size_t prefix_size
 
         *n = p;
     }
+}
+
+void Trie::DumpToDot(const std::string &filename) const {
+    std::ofstream out(filename);
+    if (!out.is_open()) {
+        throw std::runtime_error("Cannot open file: " + filename);
+    }
+
+    out << "digraph Trie {\n";
+    out << "    node [shape=circle];\n";
+    out << "    edge [arrowsize=0.5];\n\n";
+
+    std::queue<std::pair<Node_ *, size_t> > queue;
+    size_t next_id = 0;
+    std::map<Node_ *, size_t> node_ids;
+
+    if (_root) {
+        queue.push({_root, next_id});
+        node_ids[_root] = next_id++;
+    }
+
+    while (!queue.empty()) {
+        auto [node, id] = queue.front();
+        queue.pop();
+
+        out << "    node" << id << " [";
+        if (!(node->next[0] || node->next[1])) {
+            out << "shape=box, ";
+        }
+
+        if (!(node->next[0] || node->next[1]) || node->idx != 0) {
+            out << "label=\""  << GetDotNodeLabel((*_sequences)[node->idx]) << ", " << node->idx << "\"";
+        } else {
+            out << "label=\"\"";
+        }
+        out << "];\n";
+
+        for (size_t i = 0; i < NextCount; ++i) {
+            if (node->next[i]) {
+                if (node_ids.find(node->next[i]) == node_ids.end()) {
+                    node_ids[node->next[i]] = next_id;
+                    queue.push({node->next[i], next_id++});
+                }
+
+                out << "    node" << id << " -> node" << node_ids[node->next[i]]
+                        << " [label=\"" << i << "\"];\n";
+            }
+        }
+    }
+
+    out << "}\n";
+    out.close();
 }
 
 bool Trie::_insert(const uint32_t idx, const uint32_t start_bit_idx) {
@@ -175,6 +276,10 @@ void BuildTrieSingleThread(Trie &trie, const std::vector<BinSequence> &sequences
     for (size_t idx = 0; idx < sequences.size(); ++idx) {
         trie.Insert(idx);
     }
+
+    if (GlobalConfig.WriteDotFiles) {
+        trie.DumpToDot("/tmp/trie.dot");
+    }
 }
 
 void BuildTrieParallel(Trie &trie, const std::vector<BinSequence> &sequences) {
@@ -220,4 +325,8 @@ void BuildTrieParallel(Trie &trie, const std::vector<BinSequence> &sequences) {
     pool.Wait();
 
     trie.MergeTriesByPrefix(tries, 4);
+
+    if (GlobalConfig.WriteDotFiles) {
+        trie.DumpToDot("/tmp/trie.dot");
+    }
 }

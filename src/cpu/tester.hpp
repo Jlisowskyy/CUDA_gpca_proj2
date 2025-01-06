@@ -43,6 +43,8 @@ protected:
 
     void TestGPU_(const BinSequencePack &bin_sequence_pack);
 
+    void TestTrieBuild_(const BinSequencePack &bin_sequence_pack);
+
     void RunTest_(const char *test_name, const BinSequencePack &bin_sequence_pack);
 
     void VerifySolution_(const BinSequencePack &bin_sequence_pack, const std::vector<std::pair<size_t, size_t> > &out);
@@ -63,7 +65,7 @@ protected:
                 <<
                 std::endl;
 
-        // VerifySolution_(bin_sequence_pack, out);
+        VerifySolution_(bin_sequence_pack, out);
     }
 
     // ------------------------------

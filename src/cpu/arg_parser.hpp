@@ -13,7 +13,7 @@ struct ArgPack {
     bool gen_data;
     const char *generator_name;
     bool run_tests;
-    std::vector<const char*> test_names;
+    std::vector<const char *> test_names;
 };
 
 class ArgParser {
@@ -47,6 +47,8 @@ protected:
     void ParseTestFlag_(ArgPack &arg_pack);
 
     void ParseGeneratorFlag_(ArgPack &arg_pack);
+
+    void ParseWriteDot(ArgPack &arg_pack);
 
     // ------------------------------
     // class fields

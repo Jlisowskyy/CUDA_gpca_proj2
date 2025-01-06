@@ -29,7 +29,7 @@ void Dispatcher::Dispatch() const {
 
     if (arg_pack_.run_tests) {
         /* run tests possibly on previously generated data */
-        assert(arg_pack_.test_name != nullptr);
+        assert(!arg_pack_.test_names.empty());
 
         Tester tester{};
         tester.RunTests(arg_pack_.test_names, data_parser.ParseData(arg_pack_.filename));

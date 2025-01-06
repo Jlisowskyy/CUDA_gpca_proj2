@@ -1,7 +1,11 @@
 #ifndef TRIE_HPP
 #define TRIE_HPP
 
+/* internal includes */
 #include <data.hpp>
+
+/* external includes */
+#include <iostream>
 
 template<class nodeT, size_t arrSize>
 void CleanArrBasedTree(const nodeT *n) {
@@ -29,16 +33,18 @@ size_t CalcTreeSize(const nodeT *n) {
 }
 
 template<class nodeT, size_t arrSize>
-bool CompareTries(nodeT* rootLeft, nodeT* rootRight) {
+bool CompareTries(const nodeT *rootLeft, const nodeT *rootRight) {
     if (!rootLeft && !rootRight) {
         return true;
     }
 
     if (!rootLeft || !rootRight) {
+        std::cout << "One of the roots is null" << std::endl;
         return false;
     }
 
     if (rootLeft->idx != rootRight->idx) {
+        std::cout << "Roots have different idx" << std::endl;
         return false;
     }
 
@@ -90,7 +96,7 @@ public:
 
     bool Insert(const uint32_t idx, const uint32_t bit_idx = 0) { return _insert(idx, bit_idx); }
 
-    void FindPairs(uint32_t idx, std::vector<std::pair<size_t, size_t> > &out) const;
+    void FindPairs(uint32_t idx, std::vector<std::pair<size_t, size_t> > &out);
 
     [[nodiscard]] size_t GetSizeMB() const {
         static constexpr size_t kBytesInMB = 1024 * 1024;
@@ -100,12 +106,20 @@ public:
 
     void MergeTriesByPrefix(std::vector<Trie> &tries, size_t prefix_size);
 
+    bool operator==(const Trie &trie) const {
+        return CompareTries<Node_, NextCount>(_root, trie._root);
+    }
+
+    void DumpToDot(const std::string& filename) const;
+
     // ------------------------------
     // private methods
     // ------------------------------
 
 private:
     bool _insert(uint32_t idx, uint32_t start_bit_idx);
+
+    void _tryToFindPair(Node_ *p, uint32_t idx, uint32_t bit_idx, std::vector<std::pair<size_t, size_t> > &out);
 
     // ------------------------------
     // Class fields
