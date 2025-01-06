@@ -75,12 +75,23 @@ void CalculateHammingDistancesSingleThreadTrie(const std::vector<BinSequence> &s
                                                std::vector<std::pair<size_t, size_t> > &out) {
     Trie trie(sequences);
 
+    const auto build_start = std::chrono::high_resolution_clock::now();
     BuildTrieSingleThread(trie, sequences);
+    const auto build_end = std::chrono::high_resolution_clock::now();
+
     std::cout << "Total tree size in MB " << trie.GetSizeMB() << std::endl;
 
+    const auto find_start = std::chrono::high_resolution_clock::now();
     for (size_t idx = 0; idx < sequences.size(); ++idx) {
         trie.FindPairs(idx, out);
     }
+    const auto find_end = std::chrono::high_resolution_clock::now();
+
+    std::cout << "Total time spent on building trie: " << std::chrono::duration<double,
+        std::milli>(build_end - build_start).count() << "ms" << std::endl;
+
+    std::cout << "Total time spent on finding pairs: " << std::chrono::duration<double,
+        std::milli>(find_end - find_start).count() << "ms" << std::endl;
 }
 
 void CalculateHammingDistancesTrie(const std::vector<BinSequence> &sequences,
@@ -88,9 +99,13 @@ void CalculateHammingDistancesTrie(const std::vector<BinSequence> &sequences,
     Trie trie(sequences);
     std::vector<std::vector<std::pair<size_t, size_t> > > thread_out(std::thread::hardware_concurrency());
 
+    const auto build_start = std::chrono::high_resolution_clock::now();
     BuildTrieParallel(trie, sequences);
+    const auto build_end = std::chrono::high_resolution_clock::now();
+
     std::cout << "Total tree size in MB " << trie.GetSizeMB() << std::endl;
 
+    const auto find_start = std::chrono::high_resolution_clock::now();
     ThreadPool thread_pool(std::thread::hardware_concurrency());
     thread_pool.RunThreads([&trie, &out, &sequences, &thread_out](const uint32_t idx) {
         const size_t num_threads = std::thread::hardware_concurrency();
@@ -107,4 +122,10 @@ void CalculateHammingDistancesTrie(const std::vector<BinSequence> &sequences,
             out.emplace_back(pair);
         }
     }
+    const auto find_end = std::chrono::high_resolution_clock::now();
+
+    std::cout << "Total time spent on building trie: " << std::chrono::duration<double,
+        std::milli>(build_end - build_start).count() << "ms" << std::endl;
+    std::cout << "Total time spent on finding pairs: " << std::chrono::duration<double,
+        std::milli>(find_end - find_start).count() << "ms" << std::endl;
 }
