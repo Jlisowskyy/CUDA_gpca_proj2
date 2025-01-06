@@ -43,7 +43,8 @@ void ArgParser::PrintHelp() {
             "where:\n"
             "- \"filename\" is the name of the file to be processed or saved to\n"
             "- \"-g\" is an optional flag to generate data\n"
-            "- \"-t\" is an optional flag to run a specific test\n\n";
+            "- \"-t\" is an optional flag to run a specific test\n"
+            "- \"-d\" enables writing DOT files for displaying TRIEs\n\n";
 
     std::cout << "Available tests:\n";
     for (const auto test_names = Tester::GetTestNames(); const auto &test_name: test_names) {

@@ -116,6 +116,7 @@ private:
 struct BinSequencePack {
     std::vector<BinSequence> sequences;
     std::vector<std::pair<size_t, size_t> > solution;
+    uint64_t max_seq_size_bits{};
 };
 
 #endif //DATA_HPP

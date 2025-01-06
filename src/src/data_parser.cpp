@@ -97,6 +97,8 @@ void DataParser::ParseSequence_(const std::string &line, BinSequencePack &data) 
 
         sequence.SetBit(cursor++, value);
     }
+
+    data.max_seq_size_bits = std::max(data.max_seq_size_bits, sequence.GetSizeBits());
 }
 
 void DataParser::ParseSolution_(const std::string &line, BinSequencePack &data) const {

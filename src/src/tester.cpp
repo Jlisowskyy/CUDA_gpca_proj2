@@ -7,6 +7,7 @@
 #include <iostream>
 #include <chrono>
 #include <set>
+#include <thread_pool.hpp>
 #include <trie.hpp>
 
 const char *Tester::TestNames[kMaxNumTests]{
@@ -16,6 +17,7 @@ const char *Tester::TestNames[kMaxNumTests]{
     "cpu_trie",
     "gpu",
     "trie_build",
+    "test_malloc",
 };
 
 Tester::TestFuncT Tester::TestFuncs[kMaxNumTests]{
@@ -25,9 +27,10 @@ Tester::TestFuncT Tester::TestFuncs[kMaxNumTests]{
     &Tester::TestCpuTrie_,
     &Tester::TestGPU_,
     &Tester::TestTrieBuild_,
+    &Tester::TestMalloc_,
 };
 
-size_t Tester::NumTests = 6;
+size_t Tester::NumTests = 7;
 
 void Tester::RunTests(const std::vector<const char *> &test_names, const BinSequencePack &bin_sequence_pack) {
     for (const auto &test_name: test_names) {
@@ -106,6 +109,56 @@ void Tester::TestTrieBuild_(const BinSequencePack &bin_sequence_pack) {
 
     if (trie1 != trie2) {
         std::cout << "[ERROR] Tries are not equal" << std::endl;
+    }
+}
+
+static void FreeVectors(std::vector<char *> &mems) {
+    for (const char *ptr: mems) {
+        delete ptr;
+    }
+}
+
+void Tester::TestMalloc_([[maybe_unused]] const BinSequencePack &bin_sequence_pack) {
+    static constexpr size_t kNumAllocs = 1'000'000;
+
+    std::vector<char *> mems;
+    mems.reserve(kNumAllocs);
+
+    const auto t1 = std::chrono::high_resolution_clock::now();
+    for (size_t idx = 0; idx < kNumAllocs; ++idx) {
+        mems.emplace_back(new char[64]);
+    }
+    const auto t2 = std::chrono::high_resolution_clock::now();
+
+    std::cout << "Time spent using single thread: "
+            << std::chrono::duration<double, std::milli>(t2 - t1).count() << "ms" << std::endl;
+
+    FreeVectors(mems);
+
+    std::vector<std::vector<char *> > mems1(20);
+    for (size_t idx = 0; idx < 20; ++idx) {
+        mems1[idx].reserve(kNumAllocs / 20);
+    }
+
+    const auto t3 = std::chrono::high_resolution_clock::now();
+
+    ThreadPool pool(20);
+    pool.RunThreads([&](const uint32_t idx) {
+        std::vector<char *> &mem = mems1[idx];
+
+        for (size_t i = 0; i < kNumAllocs / 20; ++i) {
+            mem.emplace_back(new char[64]);
+        }
+    });
+    pool.Wait();
+
+    const auto t4 = std::chrono::high_resolution_clock::now();
+
+    std::cout << "Time spent using 20 threads: "
+            << std::chrono::duration<double, std::milli>(t4 - t3).count() << "ms" << std::endl;
+
+    for (size_t idx = 0; idx < 20; ++idx) {
+        FreeVectors(mems1[idx]);
     }
 }
 
