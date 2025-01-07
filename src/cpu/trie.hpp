@@ -7,16 +7,12 @@
 /* external includes */
 #include <iostream>
 
-template<class nodeT, size_t arrSize>
-void CleanArrBasedTree(const nodeT *n) {
-    if (!n) {
-        return;
-    }
+/* Forward declarations */
+template<size_t kChunkSize>
+class BigMemChunkAllocator;
 
-    for (size_t i = 0; i < arrSize; ++i) { CleanArrBasedTree<nodeT, arrSize>(n->next[i]); }
-
-    delete n;
-}
+static constexpr size_t kMbInBytes = 1024 * 1024;
+static constexpr size_t kDefaultAllocSize = 256 * kMbInBytes;
 
 template<class nodeT, size_t arrSize>
 size_t CalcTreeSize(const nodeT *n) {
@@ -88,7 +84,7 @@ public:
     explicit Trie(const std::vector<BinSequence> &sequences) : _sequences(&sequences) {
     }
 
-    ~Trie() { CleanArrBasedTree<Node_, NextCount>(_root); }
+    ~Trie();
 
     // ------------------------------
     // class interaction
@@ -110,7 +106,15 @@ public:
         return CompareTries<Node_, NextCount>(_root, trie._root);
     }
 
-    void DumpToDot(const std::string& filename) const;
+    void DumpToDot(const std::string &filename) const;
+
+    void SetOwner(const bool is_owner) {
+        _is_root_owner = is_owner;
+    }
+
+    void SetAllocator(BigMemChunkAllocator<kDefaultAllocSize> *allocator) {
+        _allocator = allocator;
+    }
 
     // ------------------------------
     // private methods
@@ -121,12 +125,16 @@ private:
 
     void _tryToFindPair(Node_ *p, uint32_t idx, uint32_t bit_idx, std::vector<std::pair<size_t, size_t> > &out);
 
+    [[nodiscard]] Node_ *_allocateNode() const;
+
     // ------------------------------
     // Class fields
     // ------------------------------
 
+    BigMemChunkAllocator<kDefaultAllocSize> *_allocator{};
     Node_ *_root{};
     const std::vector<BinSequence> *_sequences{};
+    bool _is_root_owner{false};
 };
 
 

@@ -101,6 +101,101 @@ protected:
     StabAllocator<Node<ItemT> > *_alloc{};
 };
 
+template<size_t kChunkSize>
+class BigMemChunkAllocator {
+public:
+    BigMemChunkAllocator() = default;
+
+    explicit BigMemChunkAllocator(const size_t bytes) {
+        Alloc((bytes + kChunkSize - 1) / kChunkSize);
+    }
+
+    ~BigMemChunkAllocator() {
+        Clear();
+    }
+
+    void Alloc(const size_t num_blocks) {
+        assert(num_blocks > 0);
+
+        _chunk = new char[kChunkSize];
+        _chunk_top = _chunk;
+
+        for (size_t idx = 0; idx < num_blocks - 1; ++idx) {
+            _chunks.push_back(new char[kChunkSize]);
+        }
+    }
+
+    void Clear() {
+        delete[] _chunk;
+        _chunk = nullptr;
+
+        for (const char *ptr: _chunks) {
+            delete[] ptr;
+        }
+        _chunks.clear();
+
+        for (const char *ptr: _wasted_chunks) {
+            delete[] ptr;
+        }
+        _wasted_chunks.clear();
+    }
+
+    template<class ItemT>
+    ItemT *AllocItem() {
+        char *current_top;
+        char *new_top;
+
+        do {
+            do {
+                std::atomic_thread_fence(std::memory_order_acquire);
+                current_top = _chunk_top;
+                new_top = current_top + sizeof(ItemT);
+
+                if (new_top > _chunk + kChunkSize) {
+                    SwapChunk_(sizeof(ItemT));
+                }
+            } while (new_top > _chunk + kChunkSize);
+        } while (!std::atomic_compare_exchange_strong(
+            reinterpret_cast<std::atomic<char *> *>(&_chunk_top),
+            &current_top,
+            new_top
+        ));
+
+        return reinterpret_cast<ItemT *>(current_top);
+    }
+
+protected:
+    void SwapChunk_(const size_t size) {
+        if (m.try_lock()) {
+            if (_chunk_top + size < _chunk + kChunkSize) {
+                m.unlock();
+                return;
+            }
+
+            /* ensure atomicity */
+            char *old_chunk = _chunk;
+            _chunk = nullptr;
+            _chunk_top = nullptr;
+            std::atomic_thread_fence(std::memory_order_release);
+
+            _wasted_chunks.push_back(old_chunk);
+            assert(!_chunks.empty());
+
+            _chunk_top = _chunks.back();
+            _chunk = _chunk_top;
+
+            _chunks.pop_back();
+            m.unlock();
+        }
+    }
+
+    std::mutex m{};
+    char *_chunk{};
+    char *_chunk_top{};
+    std::vector<char *> _chunks{};
+    std::vector<char *> _wasted_chunks{};
+};
+
 static std::string GetDotNodeLabel(const BinSequence &sequence) {
     std::string out{};
     for (size_t idx = 0; idx < sequence.GetSizeBits(); ++idx) {
@@ -108,6 +203,12 @@ static std::string GetDotNodeLabel(const BinSequence &sequence) {
     }
 
     return out;
+}
+
+Trie::~Trie() {
+    if (_is_root_owner) {
+        delete _allocator;
+    }
 }
 
 void Trie::FindPairs(const uint32_t idx, std::vector<std::pair<size_t, size_t> > &out) {
@@ -182,6 +283,11 @@ void Trie::_tryToFindPair(Node_ *p, const uint32_t idx, uint32_t bit_idx,
     }
 }
 
+Trie::Node_ *Trie::_allocateNode() const {
+    assert(_allocator != nullptr);
+    return _allocator->AllocItem<Node_>();
+}
+
 void Trie::MergeTriesByPrefix(std::vector<Trie> &tries, const size_t prefix_size) {
     /* TODO: does not work when prefix is longer than some sequences */
     /* TODO: ExtractBit */
@@ -190,7 +296,7 @@ void Trie::MergeTriesByPrefix(std::vector<Trie> &tries, const size_t prefix_size
         return (item >> idx) & 1;
     };
 
-    _root = new Node_{};
+    _root = _allocateNode();
 
     for (size_t idx = 0; idx < tries.size(); ++idx) {
         Trie &trie = tries[idx];
@@ -207,7 +313,7 @@ void Trie::MergeTriesByPrefix(std::vector<Trie> &tries, const size_t prefix_size
             const bool value = ExtractBit(idx, bit++);
 
             if (!(*n)->next[value]) {
-                (*n)->next[value] = new Node_{};
+                (*n)->next[value] = _allocateNode();
             }
 
             n = &((*n)->next[value]);
@@ -285,7 +391,7 @@ bool Trie::_insert(const uint32_t idx, const uint32_t start_bit_idx) {
 
     if (!*p) {
         /* we reached the end of the tree */
-        *p = new Node_(idx);
+        *p = _allocateNode();
         return true;
     }
 
@@ -308,14 +414,14 @@ bool Trie::_insert(const uint32_t idx, const uint32_t start_bit_idx) {
     /* we found node with assigned sequence */
     Node_ *oldNode = *p;
     const BinSequence &oldSequence = (*_sequences)[oldNode->idx];
-    *p = new Node_{};
+    *p = _allocateNode();
 
     while (bit_idx < oldSequence.GetSizeBits() &&
            bit_idx < sequence.GetSizeBits() &&
            oldSequence.GetBit(bit_idx) == sequence.GetBit(bit_idx)) {
         /* add nodes until we reach the difference or there is no more bits to compare */
 
-        Node_ *nNode = new Node_();
+        Node_ *nNode = _allocateNode();
         const bool bit = sequence.GetBit(bit_idx++);
 
         (*p)->next[bit] = nNode;
@@ -327,7 +433,10 @@ bool Trie::_insert(const uint32_t idx, const uint32_t start_bit_idx) {
         (*p)->idx = oldNode->idx;
         delete oldNode;
 
-        (*p)->next[sequence.GetBit(bit_idx)] = new Node_(idx);
+        Node_ *nNode = _allocateNode();
+        nNode->idx = idx;
+
+        (*p)->next[sequence.GetBit(bit_idx)] = nNode;
 
         return true;
     }
@@ -343,7 +452,10 @@ bool Trie::_insert(const uint32_t idx, const uint32_t start_bit_idx) {
     /* we reached the difference */
     assert(!(bit_idx == oldSequence.GetSizeBits() && bit_idx == sequence.GetSizeBits()));
     (*p)->next[oldSequence.GetBit(bit_idx)] = oldNode;
-    (*p)->next[sequence.GetBit(bit_idx)] = new Node_(idx);
+
+    Node_ *nNode = _allocateNode();
+    nNode->idx = idx;
+    (*p)->next[sequence.GetBit(bit_idx)] = nNode;
 
     return true;
 }
@@ -360,8 +472,14 @@ void BuildTrieSingleThread(Trie &trie, const std::vector<BinSequence> &sequences
 
 void BuildTrieParallel(Trie &trie, const std::vector<BinSequence> &sequences) {
     StabAllocator<Node<uint32_t> > allocator(sequences.size() + 16);
+    auto *big_mem_chunk_allocator = new BigMemChunkAllocator<kDefaultAllocSize>();
+    big_mem_chunk_allocator->Alloc(1);
+
     std::vector<ThreadSafeStack<uint32_t> > buckets{};
     buckets.reserve(16);
+
+    trie.SetAllocator(big_mem_chunk_allocator);
+    trie.SetOwner(true);
 
     for (size_t idx = 0; idx < 16; ++idx) {
         buckets.emplace_back(allocator);
@@ -370,6 +488,7 @@ void BuildTrieParallel(Trie &trie, const std::vector<BinSequence> &sequences) {
     std::vector<Trie> tries{};
     for (size_t idx = 0; idx < buckets.size(); ++idx) {
         tries.emplace_back(sequences);
+        tries.back().SetAllocator(big_mem_chunk_allocator);
     }
 
     ThreadPool pool(16);
