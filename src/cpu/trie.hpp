@@ -8,7 +8,6 @@
 #include <iostream>
 
 /* Forward declarations */
-template<size_t kChunkSize>
 class BigMemChunkAllocator;
 
 static constexpr size_t kMbInBytes = 1024 * 1024;
@@ -112,7 +111,7 @@ public:
         _is_root_owner = is_owner;
     }
 
-    void SetAllocator(BigMemChunkAllocator<kDefaultAllocSize> *allocator) {
+    void SetAllocator(BigMemChunkAllocator *allocator) {
         _allocator = allocator;
     }
 
@@ -125,13 +124,14 @@ private:
 
     void _tryToFindPair(Node_ *p, uint32_t idx, uint32_t bit_idx, std::vector<std::pair<size_t, size_t> > &out);
 
-    [[nodiscard]] Node_ *_allocateNode() const;
+    template<typename... Args>
+    [[nodiscard]] Node_ *_allocateNode(Args... args) const;
 
     // ------------------------------
     // Class fields
     // ------------------------------
 
-    BigMemChunkAllocator<kDefaultAllocSize> *_allocator{};
+    BigMemChunkAllocator*_allocator{};
     Node_ *_root{};
     const std::vector<BinSequence> *_sequences{};
     bool _is_root_owner{false};

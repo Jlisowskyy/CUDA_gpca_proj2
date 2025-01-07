@@ -101,99 +101,47 @@ protected:
     StabAllocator<Node<ItemT> > *_alloc{};
 };
 
-template<size_t kChunkSize>
 class BigMemChunkAllocator {
 public:
     BigMemChunkAllocator() = default;
-
-    explicit BigMemChunkAllocator(const size_t bytes) {
-        Alloc((bytes + kChunkSize - 1) / kChunkSize);
-    }
 
     ~BigMemChunkAllocator() {
         Clear();
     }
 
-    void Alloc(const size_t num_blocks) {
-        assert(num_blocks > 0);
+    void Alloc(const size_t num_bytes) {
+        assert(num_bytes > 0);
 
-        _chunk = new char[kChunkSize];
+        _chunk = new char[num_bytes];
         _chunk_top = _chunk;
-
-        for (size_t idx = 0; idx < num_blocks - 1; ++idx) {
-            _chunks.push_back(new char[kChunkSize]);
-        }
     }
 
     void Clear() {
         delete[] _chunk;
         _chunk = nullptr;
-
-        for (const char *ptr: _chunks) {
-            delete[] ptr;
-        }
-        _chunks.clear();
-
-        for (const char *ptr: _wasted_chunks) {
-            delete[] ptr;
-        }
-        _wasted_chunks.clear();
+        _chunk_top = nullptr;
     }
 
-    template<class ItemT>
-    ItemT *AllocItem() {
+    template<class ItemT, typename... Args>
+    ItemT *AllocItem(Args... args) {
         char *current_top;
         char *new_top;
 
         do {
-            do {
-                std::atomic_thread_fence(std::memory_order_acquire);
-                current_top = _chunk_top;
-                new_top = current_top + sizeof(ItemT);
-
-                if (new_top > _chunk + kChunkSize) {
-                    SwapChunk_(sizeof(ItemT));
-                }
-            } while (new_top > _chunk + kChunkSize);
+            current_top = _chunk_top;
+            new_top = current_top + sizeof(ItemT);
         } while (!std::atomic_compare_exchange_strong(
             reinterpret_cast<std::atomic<char *> *>(&_chunk_top),
             &current_top,
             new_top
         ));
 
-        return reinterpret_cast<ItemT *>(current_top);
+        return new(current_top) ItemT(args...);
     }
 
 protected:
-    void SwapChunk_(const size_t size) {
-        if (m.try_lock()) {
-            if (_chunk_top + size < _chunk + kChunkSize) {
-                m.unlock();
-                return;
-            }
-
-            /* ensure atomicity */
-            char *old_chunk = _chunk;
-            _chunk = nullptr;
-            _chunk_top = nullptr;
-            std::atomic_thread_fence(std::memory_order_release);
-
-            _wasted_chunks.push_back(old_chunk);
-            assert(!_chunks.empty());
-
-            _chunk_top = _chunks.back();
-            _chunk = _chunk_top;
-
-            _chunks.pop_back();
-            m.unlock();
-        }
-    }
-
-    std::mutex m{};
     char *_chunk{};
     char *_chunk_top{};
-    std::vector<char *> _chunks{};
-    std::vector<char *> _wasted_chunks{};
 };
 
 static std::string GetDotNodeLabel(const BinSequence &sequence) {
@@ -283,9 +231,12 @@ void Trie::_tryToFindPair(Node_ *p, const uint32_t idx, uint32_t bit_idx,
     }
 }
 
-Trie::Node_ *Trie::_allocateNode() const {
+template<typename... Args>
+Trie::Node_ *Trie::_allocateNode(Args... args) const {
     assert(_allocator != nullptr);
-    return _allocator->AllocItem<Node_>();
+    // return new Node_(args...);
+    auto *n = _allocator->AllocItem<Node_>(args...);
+    return n;
 }
 
 void Trie::MergeTriesByPrefix(std::vector<Trie> &tries, const size_t prefix_size) {
@@ -435,7 +386,6 @@ bool Trie::_insert(const uint32_t idx, const uint32_t start_bit_idx) {
 
         Node_ *nNode = _allocateNode();
         nNode->idx = idx;
-
         (*p)->next[sequence.GetBit(bit_idx)] = nNode;
 
         return true;
@@ -472,8 +422,8 @@ void BuildTrieSingleThread(Trie &trie, const std::vector<BinSequence> &sequences
 
 void BuildTrieParallel(Trie &trie, const std::vector<BinSequence> &sequences) {
     StabAllocator<Node<uint32_t> > allocator(sequences.size() + 16);
-    auto *big_mem_chunk_allocator = new BigMemChunkAllocator<kDefaultAllocSize>();
-    big_mem_chunk_allocator->Alloc(1);
+    auto *big_mem_chunk_allocator = new BigMemChunkAllocator();
+    big_mem_chunk_allocator->Alloc(kDefaultAllocSize);
 
     std::vector<ThreadSafeStack<uint32_t> > buckets{};
     buckets.reserve(16);
@@ -492,7 +442,7 @@ void BuildTrieParallel(Trie &trie, const std::vector<BinSequence> &sequences) {
     }
 
     ThreadPool pool(16);
-    std::barrier<> barrier(16);
+    std::barrier barrier(16);
     pool.RunThreads([&](const uint32_t idx) {
         /* Bucket sorting */
         for (size_t seq_idx = idx; seq_idx < sequences.size(); seq_idx += 16) {
