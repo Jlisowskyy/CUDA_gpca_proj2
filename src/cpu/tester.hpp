@@ -47,6 +47,8 @@ protected:
 
     void TestMalloc_(const BinSequencePack &bin_sequence_pack);
 
+    void TestAlloc(const BinSequencePack &bin_sequence_pack);
+
     void RunTest_(const char *test_name, const BinSequencePack &bin_sequence_pack);
 
     void VerifySolution_(const BinSequencePack &bin_sequence_pack, const std::vector<std::pair<size_t, size_t> > &out);

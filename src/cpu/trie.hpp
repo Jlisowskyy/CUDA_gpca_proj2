@@ -11,21 +11,7 @@
 class BigMemChunkAllocator;
 
 static constexpr size_t kMbInBytes = 1024 * 1024;
-static constexpr size_t kDefaultAllocSize = 256 * kMbInBytes;
-
-template<class nodeT, size_t arrSize>
-size_t CalcTreeSize(const nodeT *n) {
-    if (!n) {
-        return 0;
-    }
-
-    size_t size{};
-    for (size_t i = 0; i < arrSize; ++i) {
-        size += CalcTreeSize<nodeT, arrSize>(n->next[i]);
-    }
-
-    return size + sizeof(nodeT);
-}
+static constexpr size_t kDefaultAllocSize = 2048 * kMbInBytes;
 
 template<class nodeT, size_t arrSize>
 bool CompareTries(const nodeT *rootLeft, const nodeT *rootRight) {
@@ -59,7 +45,7 @@ class Trie {
 
     static constexpr size_t NextCount = 2;
 
-    struct Node_ {
+    struct alignas(1) Node_ {
         Node_() = default;
 
         explicit Node_(const uint32_t seq_idx) : idx{seq_idx} {
@@ -93,11 +79,7 @@ public:
 
     void FindPairs(uint32_t idx, std::vector<std::pair<size_t, size_t> > &out);
 
-    [[nodiscard]] size_t GetSizeMB() const {
-        static constexpr size_t kBytesInMB = 1024 * 1024;
-
-        return (CalcTreeSize<Node_, NextCount>(_root) + kBytesInMB) / kBytesInMB;
-    }
+    [[nodiscard]] size_t GetSizeMB() const;
 
     void MergeTriesByPrefix(std::vector<Trie> &tries, size_t prefix_size);
 

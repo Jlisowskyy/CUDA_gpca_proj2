@@ -1,14 +1,16 @@
 /* internal includes */
 #include <tester.hpp>
 #include <hamming.hpp>
+#include <allocators.hpp>
+#include <trie.hpp>
+#include <thread_pool.hpp>
 
 /* external includes */
 #include <stdexcept>
 #include <iostream>
 #include <chrono>
 #include <set>
-#include <thread_pool.hpp>
-#include <trie.hpp>
+#include <array>
 
 const char *Tester::TestNames[kMaxNumTests]{
     "cpu_single_naive",
@@ -18,6 +20,7 @@ const char *Tester::TestNames[kMaxNumTests]{
     "gpu",
     "trie_build",
     "test_malloc",
+    "test_alloc",
 };
 
 Tester::TestFuncT Tester::TestFuncs[kMaxNumTests]{
@@ -28,9 +31,10 @@ Tester::TestFuncT Tester::TestFuncs[kMaxNumTests]{
     &Tester::TestGPU_,
     &Tester::TestTrieBuild_,
     &Tester::TestMalloc_,
+    &Tester::TestAlloc,
 };
 
-size_t Tester::NumTests = 7;
+size_t Tester::NumTests = 8;
 
 void Tester::RunTests(const std::vector<const char *> &test_names, const BinSequencePack &bin_sequence_pack) {
     for (const auto &test_name: test_names) {
@@ -160,6 +164,57 @@ void Tester::TestMalloc_([[maybe_unused]] const BinSequencePack &bin_sequence_pa
     for (size_t idx = 0; idx < 20; ++idx) {
         FreeVectors(mems1[idx]);
     }
+}
+
+void Tester::TestAlloc(const BinSequencePack &bin_sequence_pack) {
+    static constexpr size_t kNumAllocs = 1'000'000;
+    static constexpr size_t kMemToAlloc = 2048 * kMbInBytes;
+
+    /* prepare allocator */
+    auto *alloca = new BigMemChunkAllocator();
+    alloca->Alloc(kMemToAlloc);
+    std::vector<void *> mems{};
+
+    /* run first test */
+    const auto t1 = std::chrono::high_resolution_clock::now();
+    for (size_t idx = 0; idx < kNumAllocs; ++idx) {
+        mems.emplace_back(reinterpret_cast<void *>(alloca->AllocItem<std::array<char, 64> >()));
+    }
+    const auto t2 = std::chrono::high_resolution_clock::now();
+
+    std::cout << "Time spent using single thread: "
+            << std::chrono::duration<double, std::milli>(t2 - t1).count() << "ms" << std::endl;
+
+    /* cleanup first allocator */
+    alloca->Clear();
+
+    /* prepare second allocator */
+    alloca->Alloc(kMemToAlloc);
+    std::vector<std::vector<void *> > mems1(20);
+    for (size_t idx = 0; idx < 20; ++idx) {
+        mems1[idx].reserve(kNumAllocs / 20);
+    }
+
+    /* run second test */
+    const auto t3 = std::chrono::high_resolution_clock::now();
+
+    ThreadPool pool(20);
+    pool.RunThreads([&](const uint32_t idx) {
+        std::vector<void *> &mem = mems1[idx];
+
+        for (size_t i = 0; i < kNumAllocs / 20; ++i) {
+            mem.emplace_back(reinterpret_cast<void *>(alloca->AllocItem<std::array<char, 64> >()));
+        }
+    });
+    pool.Wait();
+
+    const auto t4 = std::chrono::high_resolution_clock::now();
+
+    std::cout << "Time spent using 20 threads: "
+            << std::chrono::duration<double, std::milli>(t4 - t3).count() << "ms" << std::endl;
+
+    /* cleanup allocator */
+    delete alloca;
 }
 
 void Tester::RunTest_(const char *test_name, const BinSequencePack &bin_sequence_pack) {

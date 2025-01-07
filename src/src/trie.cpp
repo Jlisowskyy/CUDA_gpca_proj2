@@ -2,6 +2,7 @@
 #include <trie.hpp>
 #include <thread_pool.hpp>
 #include <global_conf.hpp>
+#include <allocators.hpp>
 
 /* external includes */
 #include <iostream>
@@ -10,139 +11,6 @@
 #include <queue>
 #include <map>
 #include <string>
-
-template<typename ItemT>
-struct Node {
-    ItemT item{};
-    uint32_t mem_idx{};
-};
-
-template<typename ItemT>
-class StabAllocator {
-public:
-    explicit StabAllocator(const size_t num_items): _num_items(num_items), _items(new ItemT[num_items + 1]) {
-    };
-
-    uint32_t AllocNotSafe() {
-        return ++_num_allocated;
-    }
-
-    uint32_t AllocSafe() {
-        size_t current_idx;
-        do {
-            current_idx = _num_allocated;
-            assert(current_idx < _num_items);
-        } while (!std::atomic_compare_exchange_weak(
-            reinterpret_cast<std::atomic<size_t> *>(&_num_allocated),
-            &current_idx,
-            current_idx + 1
-        ));
-
-        return current_idx + 1;
-    }
-
-    ItemT *GetBase() const { return _items; }
-    ItemT *GetItem(uint32_t idx) { return _items + idx; }
-
-    ~StabAllocator() {
-        delete []_items;
-    }
-
-protected:
-    size_t _num_items{};
-    size_t _num_allocated{};
-    ItemT *_items{};
-};
-
-template<typename ItemT>
-class ThreadSafeStack {
-public:
-    explicit ThreadSafeStack(StabAllocator<Node<ItemT> > &alloc): _top(alloc.AllocNotSafe()), _alloc(&alloc) {
-    }
-
-    bool IsEmpty() {
-        return _alloc->GetItem(_top)->mem_idx == 0;
-    }
-
-    void PushSafe(const ItemT &item) {
-        uint32_t new_idx = _alloc->AllocSafe();
-        Node<ItemT> *new_node = _alloc->GetItem(new_idx);
-        new_node->item = item;
-
-        uint32_t current_top;
-        do {
-            current_top = _top;
-            new_node->mem_idx = current_top;
-        } while (!std::atomic_compare_exchange_strong(
-            reinterpret_cast<std::atomic<uint32_t> *>(&_top),
-            &current_top,
-            new_idx
-        ));
-
-        ++_counter;
-    }
-
-    ItemT PopNotSafe() {
-        uint32_t current_top = _top;
-        Node<ItemT> *top_node = _alloc->GetItem(current_top);
-        _top = top_node->mem_idx;
-
-        --_counter;
-        return top_node->item;
-    }
-
-    [[nodiscard]] uint32_t GetSize() const {
-        return _counter;
-    }
-
-protected:
-    uint32_t _top{};
-    uint32_t _counter{};
-    StabAllocator<Node<ItemT> > *_alloc{};
-};
-
-class BigMemChunkAllocator {
-public:
-    BigMemChunkAllocator() = default;
-
-    ~BigMemChunkAllocator() {
-        Clear();
-    }
-
-    void Alloc(const size_t num_bytes) {
-        assert(num_bytes > 0);
-
-        _chunk = new char[num_bytes];
-        _chunk_top = _chunk;
-    }
-
-    void Clear() {
-        delete[] _chunk;
-        _chunk = nullptr;
-        _chunk_top = nullptr;
-    }
-
-    template<class ItemT, typename... Args>
-    ItemT *AllocItem(Args... args) {
-        char *current_top;
-        char *new_top;
-
-        do {
-            current_top = _chunk_top;
-            new_top = current_top + sizeof(ItemT);
-        } while (!std::atomic_compare_exchange_strong(
-            reinterpret_cast<std::atomic<char *> *>(&_chunk_top),
-            &current_top,
-            new_top
-        ));
-
-        return new(current_top) ItemT(args...);
-    }
-
-protected:
-    char *_chunk{};
-    char *_chunk_top{};
-};
 
 static std::string GetDotNodeLabel(const BinSequence &sequence) {
     std::string out{};
@@ -204,6 +72,11 @@ void Trie::FindPairs(const uint32_t idx, std::vector<std::pair<size_t, size_t> >
     assert((p && p->idx == idx) || sequence.Compare((*_sequences)[p->idx]));
 }
 
+size_t Trie::GetSizeMB() const {
+    static constexpr size_t kBytesInMB = 1024 * 1024;
+    return _allocator->GetUsedSize() / kBytesInMB;
+}
+
 void Trie::_tryToFindPair(Node_ *p, const uint32_t idx, uint32_t bit_idx,
                           std::vector<std::pair<size_t, size_t> > &out) {
     /* Check if we have a valid node */
@@ -235,7 +108,10 @@ template<typename... Args>
 Trie::Node_ *Trie::_allocateNode(Args... args) const {
     assert(_allocator != nullptr);
     // return new Node_(args...);
-    auto *n = _allocator->AllocItem<Node_>(args...);
+
+    auto n = _allocator->AllocItem<Node_>(args...);
+    assert(n != nullptr);
+
     return n;
 }
 
@@ -342,7 +218,7 @@ bool Trie::_insert(const uint32_t idx, const uint32_t start_bit_idx) {
 
     if (!*p) {
         /* we reached the end of the tree */
-        *p = _allocateNode();
+        *p = _allocateNode(idx);
         return true;
     }
 
@@ -372,21 +248,16 @@ bool Trie::_insert(const uint32_t idx, const uint32_t start_bit_idx) {
            oldSequence.GetBit(bit_idx) == sequence.GetBit(bit_idx)) {
         /* add nodes until we reach the difference or there is no more bits to compare */
 
-        Node_ *nNode = _allocateNode();
         const bool bit = sequence.GetBit(bit_idx++);
 
-        (*p)->next[bit] = nNode;
+        (*p)->next[bit] = _allocateNode();
         p = &((*p)->next[bit]);
     }
 
     if (bit_idx == oldSequence.GetSizeBits()) {
         /* we reached the end of the old sequence */
         (*p)->idx = oldNode->idx;
-        delete oldNode;
-
-        Node_ *nNode = _allocateNode();
-        nNode->idx = idx;
-        (*p)->next[sequence.GetBit(bit_idx)] = nNode;
+        (*p)->next[sequence.GetBit(bit_idx)] = _allocateNode(idx);
 
         return true;
     }
@@ -402,15 +273,17 @@ bool Trie::_insert(const uint32_t idx, const uint32_t start_bit_idx) {
     /* we reached the difference */
     assert(!(bit_idx == oldSequence.GetSizeBits() && bit_idx == sequence.GetSizeBits()));
     (*p)->next[oldSequence.GetBit(bit_idx)] = oldNode;
-
-    Node_ *nNode = _allocateNode();
-    nNode->idx = idx;
-    (*p)->next[sequence.GetBit(bit_idx)] = nNode;
+    (*p)->next[sequence.GetBit(bit_idx)] = _allocateNode(idx);
 
     return true;
 }
 
 void BuildTrieSingleThread(Trie &trie, const std::vector<BinSequence> &sequences) {
+    auto *big_mem_chunk_allocator = new BigMemChunkAllocator();
+    big_mem_chunk_allocator->Alloc(kDefaultAllocSize);
+    trie.SetAllocator(big_mem_chunk_allocator);
+    trie.SetOwner(true);
+
     for (size_t idx = 0; idx < sequences.size(); ++idx) {
         trie.Insert(idx);
     }
