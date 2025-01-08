@@ -124,6 +124,7 @@ static void FreeVectors(std::vector<char *> &mems) {
 
 void Tester::TestMalloc_([[maybe_unused]] const BinSequencePack &bin_sequence_pack) {
     static constexpr size_t kNumAllocs = 1'000'000;
+    static constexpr size_t kNumThreads = 20;
 
     std::vector<char *> mems;
     mems.reserve(kNumAllocs);
@@ -139,18 +140,18 @@ void Tester::TestMalloc_([[maybe_unused]] const BinSequencePack &bin_sequence_pa
 
     FreeVectors(mems);
 
-    std::vector<std::vector<char *> > mems1(20);
-    for (size_t idx = 0; idx < 20; ++idx) {
-        mems1[idx].reserve(kNumAllocs / 20);
+    std::vector<std::vector<char *> > mems1(kNumThreads);
+    for (size_t idx = 0; idx < kNumThreads; ++idx) {
+        mems1[idx].reserve(kNumAllocs / kNumThreads);
     }
 
     const auto t3 = std::chrono::high_resolution_clock::now();
 
-    ThreadPool pool(20);
+    ThreadPool pool(kNumThreads);
     pool.RunThreads([&](const uint32_t idx) {
         std::vector<char *> &mem = mems1[idx];
 
-        for (size_t i = 0; i < kNumAllocs / 20; ++i) {
+        for (size_t i = 0; i < kNumAllocs / kNumThreads; ++i) {
             mem.emplace_back(new char[64]);
         }
     });
@@ -158,16 +159,17 @@ void Tester::TestMalloc_([[maybe_unused]] const BinSequencePack &bin_sequence_pa
 
     const auto t4 = std::chrono::high_resolution_clock::now();
 
-    std::cout << "Time spent using 20 threads: "
+    std::cout << "Time spent using " << kNumThreads << " threads: "
             << std::chrono::duration<double, std::milli>(t4 - t3).count() << "ms" << std::endl;
 
-    for (size_t idx = 0; idx < 20; ++idx) {
+    for (size_t idx = 0; idx < kNumThreads; ++idx) {
         FreeVectors(mems1[idx]);
     }
 }
 
 void Tester::TestAlloc(const BinSequencePack &bin_sequence_pack) {
     static constexpr size_t kNumAllocs = 1'000'000;
+    static constexpr size_t kNumThreads = 20;
     static constexpr size_t kMemToAlloc = 2048 * kMbInBytes;
 
     /* prepare allocator */
@@ -190,19 +192,19 @@ void Tester::TestAlloc(const BinSequencePack &bin_sequence_pack) {
 
     /* prepare second allocator */
     alloca->Alloc(kMemToAlloc);
-    std::vector<std::vector<void *> > mems1(20);
-    for (size_t idx = 0; idx < 20; ++idx) {
-        mems1[idx].reserve(kNumAllocs / 20);
+    std::vector<std::vector<void *> > mems1(kNumThreads);
+    for (size_t idx = 0; idx < kNumThreads; ++idx) {
+        mems1[idx].reserve(kNumAllocs / kNumThreads);
     }
 
     /* run second test */
     const auto t3 = std::chrono::high_resolution_clock::now();
 
-    ThreadPool pool(20);
+    ThreadPool pool(kNumThreads);
     pool.RunThreads([&](const uint32_t idx) {
         std::vector<void *> &mem = mems1[idx];
 
-        for (size_t i = 0; i < kNumAllocs / 20; ++i) {
+        for (size_t i = 0; i < kNumAllocs / kNumThreads; ++i) {
             mem.emplace_back(reinterpret_cast<void *>(alloca->AllocItem<std::array<char, 64> >()));
         }
     });
@@ -210,7 +212,7 @@ void Tester::TestAlloc(const BinSequencePack &bin_sequence_pack) {
 
     const auto t4 = std::chrono::high_resolution_clock::now();
 
-    std::cout << "Time spent using 20 threads: "
+    std::cout << "Time spent using " << kNumThreads << " threads: "
             << std::chrono::duration<double, std::milli>(t4 - t3).count() << "ms" << std::endl;
 
     /* cleanup allocator */
