@@ -10,20 +10,6 @@
 
 class cuda_Trie {
     // ------------------------------
-    // Class inner types
-    // ------------------------------
-
-    static constexpr uint32_t kNextCount = 2;
-
-    struct Node_ {
-        HYBRID explicit Node_(const uint32_t idx) : seq_idx(idx) {
-        }
-
-        uint32_t next[kNextCount]{};
-        uint32_t seq_idx;
-    };
-
-    // ------------------------------
     // Class creation
     // ------------------------------
 public:

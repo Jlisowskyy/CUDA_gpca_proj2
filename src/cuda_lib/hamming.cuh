@@ -14,6 +14,6 @@
 std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> InitHamming(const BinSequencePack &pack);
 
 std::vector<std::tuple<uint32_t, uint32_t> > Hamming1Distance(cuda_Trie *d_trie, cuda_Data *d_data,
-                                                              cuda_Allocator *allocator);
+                                                              cuda_Allocator *d_allocator);
 
 #endif //HAMMING_CUH
