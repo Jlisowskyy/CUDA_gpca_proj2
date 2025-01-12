@@ -11,7 +11,7 @@
 class BigMemChunkAllocator;
 
 static constexpr size_t kMbInBytes = 1024 * 1024;
-static constexpr size_t kDefaultAllocSize = 2048 * kMbInBytes;
+static constexpr size_t kDefaultAllocSize = 4 * 2048 * kMbInBytes;
 
 template<class nodeT, size_t arrSize>
 bool CompareTries(const nodeT *rootLeft, const nodeT *rootRight) {

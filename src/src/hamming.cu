@@ -3,10 +3,28 @@
 #include <cuda_trie.cuh>
 #include <data.cuh>
 #include <thread_mgr.cuh>
+#include <thread_pool.hpp>
+#include <allocators.hpp>
 
 /* external includes */
 #include <chrono>
 #include <iostream>
+#include <barrier>
+#include <bit>
+
+// ------------------------------
+// Helpers
+// ------------------------------
+
+static uint32_t _getMask(const uint32_t num_bits) {
+    uint32_t mask{};
+
+    for (uint32_t idx = 0; idx < num_bits; ++idx) {
+        mask |= static_cast<uint32_t>(1) << idx;
+    }
+
+    return mask;
+}
 
 // ------------------------------
 // Kernels
@@ -28,22 +46,18 @@ __global__ void FindAllHamming1Pairs(cuda_Trie *out_trie, const cuda_Data *data,
 }
 
 // ------------------------------
-// GPU interface functions
+// Static functions
 // ------------------------------
 
-std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> InitHamming(const BinSequencePack &pack) {
+static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnDevice(
+    const MgrTrieBuildData &mgr_data, const BinSequencePack &pack) {
     /* convert pack to cuda_Data */
     cuda_Data data{pack};
-
-    /* calculate management data */
-    const ThreadMgr mgr{};
-    const auto mgr_data = mgr.PrepareTrieBuildData(pack);
 
     /* prepare allocator */
     cuda_Allocator allocator(mgr_data.max_nodes, mgr_data.max_threads, mgr_data.max_nodes_per_thread);
 
     /* prepare GPU data */
-
     const auto t_mem_start = std::chrono::high_resolution_clock::now();
 
     cuda_Trie *d_trie;
@@ -82,6 +96,92 @@ std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> InitHamming(const BinSequ
     CUDA_ASSERT_SUCCESS(cudaFree(mgr_data.d_bucket_prefix_len));
 
     return {d_trie, d_data, d_allocator};
+}
+
+static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnHost(const BinSequencePack &pack) {
+    const uint64_t num_threads = std::bit_floor(std::thread::hardware_concurrency());
+    const uint64_t power_of_2 = std::countr_zero(num_threads);
+    const uint32_t prefix_mask = _getMask(power_of_2);
+
+    /* split sequences into `num_threads` buckets */
+    StabAllocator<Node<uint32_t> > allocator(pack.sequences.size() + num_threads);
+
+    /* Prepare buckets */
+    std::vector<ThreadSafeStack<uint32_t> > buckets{};
+    buckets.reserve(num_threads);
+
+    for (size_t idx = 0; idx < num_threads; ++idx) {
+        buckets.emplace_back(allocator);
+    }
+
+    /* Prepare thread pool */
+    ThreadPool pool(num_threads);
+    std::barrier barrier(num_threads);
+
+    /* Prepare cuda alloca */
+    cuda_Allocator cuda_allocator(pack.sequences.size() * pack.max_seq_size_bits, num_threads, pack.max_seq_size_bits);
+
+    /* convert pack to cuda_Data */
+    cuda_Data data{pack};
+
+    /* Prepare tries */
+    std::vector<cuda_Trie> tries;
+    tries.resize(num_threads);
+
+    /* Run threads */
+    pool.RunThreads([&](const uint32_t thread_idx) {
+        /* Bucket sorting */
+        for (size_t seq_idx = thread_idx; seq_idx < pack.sequences.size(); seq_idx += num_threads) {
+            const size_t key = pack.sequences[seq_idx].GetWord(0) & prefix_mask;
+            buckets[key].PushSafe(seq_idx);
+        }
+
+        if (thread_idx == 0) {
+            std::cout << "Bucket stats: " << std::endl;
+            for (size_t b_idx = 0; b_idx < buckets.size(); ++b_idx) {
+                std::cout << "Bucket " << b_idx << " size: " << buckets[b_idx].GetSize() << std::endl;
+            }
+        }
+
+        /* Wait for all threads finish radix sort */
+        barrier.arrive_and_wait();
+
+        /* fill the tries */
+        auto &bucket = buckets[thread_idx];
+        auto &trie = tries[thread_idx];
+
+        while (!bucket.IsEmpty()) {
+            const auto seq_idx = bucket.PopNotSafe();
+            trie.Insert(cuda_allocator, seq_idx, power_of_2, data);
+
+            cuda_allocator.ConsolidateHost(thread_idx, barrier);
+        }
+    });
+
+    pool.Wait();
+
+    /* merge tries */
+    cuda_Trie final_trie{};
+
+    final_trie.MergeByPrefixHost(tries, power_of_2);
+
+    return {final_trie.DumpToGpu(), data.DumpToGPU(), cuda_allocator.DumpToGPU()};
+}
+
+// ------------------------------
+// GPU interface functions
+// ------------------------------
+
+std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> InitHamming(const BinSequencePack &pack) {
+    /* calculate management data */
+    const ThreadMgr mgr{};
+    const auto mgr_data = mgr.PrepareTrieBuildData(pack);
+
+    if (mgr_data.build_on_device) {
+        return _buildOnDevice(mgr_data, pack);
+    }
+
+    return _buildOnHost(pack);
 }
 
 std::vector<std::tuple<uint32_t, uint32_t> > Hamming1Distance(cuda_Trie *d_trie, cuda_Data *d_data,

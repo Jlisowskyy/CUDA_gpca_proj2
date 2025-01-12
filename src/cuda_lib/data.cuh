@@ -9,8 +9,7 @@
 /* internal includes */
 #include <defines.cuh>
 #include <data.hpp>
-
-#include "../cpu/allocators.hpp"
+#include <barrier>
 
 // ------------------------------
 // GPU data Node
@@ -89,9 +88,12 @@ public:
 
     void DeallocHost() {
         delete _data;
+        delete _idxes;
         delete _node_counters;
         delete _thread_nodes;
+        delete _thread_tails;
 
+        _idxes = nullptr;
         _data = nullptr;
         _node_counters = nullptr;
         _thread_nodes = nullptr;
@@ -101,7 +103,7 @@ public:
 
     void static DeallocGPU(cuda_Allocator *d_allocator);
 
-    [[nodiscard]] FAST_DCALL_ALWAYS uint32_t AllocateNode(const uint32_t t_idx) const {
+    [[nodiscard]] FAST_CALL_ALWAYS uint32_t AllocateNode(const uint32_t t_idx) const {
         --_node_counters[t_idx];
 
         const uint32_t idx = _thread_nodes[t_idx];
@@ -114,13 +116,15 @@ public:
 
     __device__ void Consolidate(uint32_t t_idx);
 
+    void ConsolidateHost(uint32_t t_idx, std::barrier<> &barrier);
+
     // ------------------------------
     // Private methods
     // ------------------------------
 protected:
-    __device__ void _prepareIdxes();
+    HYBRID void _prepareIdxes();
 
-    __device__ void _cleanUpOwnSpace(uint32_t t_idx);
+    HYBRID void _cleanUpOwnSpace(uint32_t t_idx);
 
     // ------------------------------
     // Class fields
@@ -132,6 +136,7 @@ protected:
 
     uint32_t *_node_counters{};
     uint32_t *_thread_nodes{};
+    uint32_t *_thread_tails{};
 
     uint32_t _max_threads{};
     uint32_t _max_node_per_thread{};
@@ -140,7 +145,7 @@ protected:
     // GPU only fields
     // ------------------------------
 
-    uint32_t *_d_idxes{};
+    uint32_t *_idxes{};
 };
 
 // ------------------------------

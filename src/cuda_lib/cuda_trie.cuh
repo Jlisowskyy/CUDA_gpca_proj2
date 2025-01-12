@@ -21,15 +21,18 @@ public:
     // class interaction
     // ------------------------------
 
-    __device__ bool Insert(uint32_t seq_idx, uint32_t bit_idx, const cuda_Data& data);
-    __device__ void FindPairs(uint32_t seq_idx, const cuda_Data& data, cuda_Solution& solutions);
+    HYBRID bool Insert(cuda_Allocator &allocator, uint32_t seq_idx, uint32_t bit_idx, const cuda_Data &data);
+
+    __device__ void FindPairs(uint32_t seq_idx, const cuda_Data &data, cuda_Solution &solutions);
+
+    cuda_Trie *DumpToGpu();
+
+    void MergeByPrefixHost(const std::vector<cuda_Trie>& tries, uint32_t prefix_len);
 
     // ------------------------------
     // private methods
     // ------------------------------
 private:
-
-
     // ------------------------------
     // Class fields
     // ------------------------------

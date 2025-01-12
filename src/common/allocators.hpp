@@ -22,17 +22,7 @@ public:
     }
 
     uint32_t AllocSafe() {
-        size_t current_idx;
-        do {
-            current_idx = _num_allocated;
-            assert(current_idx < _num_items);
-        } while (!std::atomic_compare_exchange_weak(
-            reinterpret_cast<std::atomic<size_t> *>(&_num_allocated),
-            &current_idx,
-            current_idx + 1
-        ));
-
-        return current_idx + 1;
+        return reinterpret_cast<std::atomic<size_t> *>(&_num_allocated)->fetch_add(1) + 1;
     }
 
     ItemT *GetBase() const { return _items; }
