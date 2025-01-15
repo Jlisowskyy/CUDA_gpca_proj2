@@ -119,13 +119,13 @@ public:
 
     void ConsolidateHost(uint32_t t_idx, std::barrier<> &barrier, bool isLastRun);
 
-    HYBRID Node_& operator[](const uint32_t idx) {
+    HYBRID Node_ &operator[](const uint32_t idx) {
         assert(idx != 0 && "NULL POINTER DEREFERENCE DETECTED");
         assert(idx < _max_nodes + 1 && "DETECTED OVERFLOW");
         return _data[idx];
     }
 
-    HYBRID const Node_& operator[](const uint32_t idx) const {
+    HYBRID const Node_ &operator[](const uint32_t idx) const {
         assert(idx != 0 && "NULL POINTER DEREFERENCE DETECTED");
         assert(idx < _max_nodes + 1 && "DETECTED OVERFLOW");
         return _data[idx];
@@ -220,6 +220,20 @@ public:
 
             word &= ~(1 << bit_offset);
             word |= value << bit_offset;
+        }
+
+        FAST_CALL_ALWAYS bool Compare(const SequenceFetcher &other, const size_t bit_idx = 0) const {
+            if (GetSequenceLength() != other.GetSequenceLength()) {
+                return false;
+            }
+
+            for (uint32_t b_idx = 0; b_idx < GetSequenceLength(); ++b_idx) {
+                if (GetBit(b_idx) != other.GetBit(b_idx)) {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         // ------------------------------

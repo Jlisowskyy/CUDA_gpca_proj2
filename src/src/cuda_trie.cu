@@ -92,12 +92,16 @@ bool cuda_Trie::Insert(const uint32_t t_idx, cuda_Allocator &allocator, const ui
     return true;
 }
 
-cuda_Trie *cuda_Trie::DumpToGpu() {
-    return nullptr;
+cuda_Trie *cuda_Trie::DumpToGpu() const {
+    cuda_Trie *d_trie;
+    CUDA_ASSERT_SUCCESS(cudaMalloc(&d_trie, sizeof(cuda_Trie)));
+    CUDA_ASSERT_SUCCESS(cudaMemcpy(d_trie, this, sizeof(cuda_Trie), cudaMemcpyHostToDevice));
+
+    return d_trie;
 }
 
 void cuda_Trie::MergeByPrefixHost(cuda_Allocator &allocator, const cuda_Data &data, std::vector<cuda_Trie> &tries,
-    uint32_t prefix_len) {
+                                  const uint32_t prefix_len) {
     static const auto ExtractBit = [](const size_t item, const size_t idx) {
         return (item >> idx) & 1;
     };
@@ -113,7 +117,7 @@ void cuda_Trie::MergeByPrefixHost(cuda_Allocator &allocator, const cuda_Data &da
             continue;
         }
 
-        uint32_t* node_idx = &_root_idx;
+        uint32_t *node_idx = &_root_idx;
         uint32_t bit = 0;
         while (bit < prefix_len) {
             const bool value = ExtractBit(idx, bit++);

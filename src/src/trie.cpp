@@ -57,12 +57,10 @@ void Trie::FindPairs(const uint32_t idx, std::vector<std::pair<size_t, size_t> >
     if (bit_idx == sequence.GetSizeBits()) {
         /* add child if are valid pair */
 
-        if (p->next[0] && p->next[0]->idx != UINT32_MAX && idx < p->next[0]->idx) {
-            out.emplace_back(p->next[0]->idx, idx);
-        }
-
-        if (p->next[1] && p->next[1]->idx != UINT32_MAX && idx < p->next[1]->idx) {
-            out.emplace_back(p->next[1]->idx, idx);
+        for (const auto & i : p->next) {
+            if (i && i->idx != UINT32_MAX && idx < i->idx) {
+                out.emplace_back(i->idx, idx);
+            }
         }
 
         return;
@@ -107,7 +105,6 @@ void Trie::_tryToFindPair(Node_ *p, const uint32_t idx, uint32_t bit_idx,
 template<typename... Args>
 Trie::Node_ *Trie::_allocateNode(Args... args) const {
     assert(_allocator != nullptr);
-    // return new Node_(args...);
 
     auto n = _allocator->AllocItem<Node_>(args...);
     assert(n != nullptr);

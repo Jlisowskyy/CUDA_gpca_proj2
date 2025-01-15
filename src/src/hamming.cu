@@ -41,13 +41,14 @@ __global__ void BuildTrieKernel(cuda_Trie *out_trie, uint32_t *buckets, uint32_t
     // TODO
 }
 
-__global__ void FindAllHamming1Pairs(cuda_Trie *out_trie, const cuda_Data *data, cuda_Solution *solutions) {
+__global__ void FindAllHamming1Pairs(const cuda_Trie *out_trie, const cuda_Allocator *alloca, const cuda_Data *data,
+                                     cuda_Solution *solutions) {
     const uint32_t thread_idx = blockIdx.x * blockDim.x + threadIdx.x;
     const uint32_t num_threads = gridDim.x * blockDim.x;
     const uint32_t num_sequences = data->GetNumSequences();
 
     for (uint32_t seq_idx = thread_idx; seq_idx < num_sequences; seq_idx += num_threads) {
-        out_trie->FindPairs(seq_idx, *data, solutions[seq_idx]);
+        out_trie->FindPairs(seq_idx, *alloca, *data, solutions[seq_idx]);
     }
 }
 
@@ -57,7 +58,6 @@ __global__ void FindAllHamming1Pairs(cuda_Trie *out_trie, const cuda_Data *data,
 
 static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnDevice(
     const MgrTrieBuildData &mgr_data, const BinSequencePack &pack) {
-
     /* prepare GPU data */
     std::cout << "Preparing GPU data..." << std::endl;
     const auto t_mem_start = std::chrono::high_resolution_clock::now();
@@ -184,7 +184,7 @@ static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnHost(const
     cuda_Trie final_trie{};
 
     std::cout << "Merging tries..." << std::endl;
-    final_trie.MergeByPrefixHost(cuda_allocator, data,tries, power_of_2);
+    final_trie.MergeByPrefixHost(cuda_allocator, data, tries, power_of_2);
 
     const auto t_build_end = std::chrono::high_resolution_clock::now();
 
@@ -256,7 +256,7 @@ std::vector<std::tuple<uint32_t, uint32_t> > Hamming1Distance(cuda_Trie *d_trie,
     const auto t_start = std::chrono::high_resolution_clock::now();
 
     /* find all pairs */
-    FindAllHamming1Pairs<<<mgr_data.num_blocks, mgr_data.num_threads_per_block>>>(d_trie, d_data, d_sol);
+    FindAllHamming1Pairs<<<mgr_data.num_blocks, mgr_data.num_threads_per_block>>>(d_trie, d_allocator, d_data, d_sol);
     CUDA_ASSERT_SUCCESS(cudaDeviceSynchronize());
 
     const auto t_end = std::chrono::high_resolution_clock::now();

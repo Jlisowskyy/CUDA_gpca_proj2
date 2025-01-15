@@ -99,6 +99,10 @@ public:
     }
 
     [[nodiscard]] bool Compare(const BinSequence &sequence, const size_t bit_idx = 0) const {
+        if (sequence.GetSizeBits() != size_bits_) {
+            return false;
+        }
+
         for (size_t idx = bit_idx; idx < size_bits_; ++idx) {
             if (GetBit(idx) != sequence.GetBit(idx)) {
                 return false;
