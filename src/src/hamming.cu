@@ -57,20 +57,21 @@ __global__ void FindAllHamming1Pairs(cuda_Trie *out_trie, const cuda_Data *data,
 
 static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnDevice(
     const MgrTrieBuildData &mgr_data, const BinSequencePack &pack) {
-    /* convert pack to cuda_Data */
-    cuda_Data data{pack};
-
-    /* prepare allocator */
-    cuda_Allocator allocator(mgr_data.max_nodes, mgr_data.max_threads, mgr_data.max_nodes_per_thread);
 
     /* prepare GPU data */
     std::cout << "Preparing GPU data..." << std::endl;
     const auto t_mem_start = std::chrono::high_resolution_clock::now();
 
+    /* convert pack to cuda_Data */
+    cuda_Data data{pack};
+    cuda_Data *d_data = data.DumpToGPU();
+
+    /* prepare allocator */
+    cuda_Allocator allocator(mgr_data.max_nodes, mgr_data.max_threads, mgr_data.max_nodes_per_thread);
+    cuda_Allocator *d_allocator = allocator.DumpToGPU();
+
     cuda_Trie *d_trie;
     CUDA_ASSERT_SUCCESS(cudaMalloc(&d_trie, sizeof(cuda_Trie)));
-    cuda_Allocator *d_allocator = allocator.DumpToGPU();
-    cuda_Data *d_data = data.DumpToGPU();
 
     const auto t_mem_end = std::chrono::high_resolution_clock::now();
 
@@ -131,11 +132,14 @@ static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnHost(const
     std::atomic<int32_t> thread_counter;
     thread_counter.store(static_cast<int32_t>(num_threads));
 
+    cuda_Data data{pack};
+    /* Dump before creating cuda_alloc to know available memory */
+    cuda_Data *d_data = data.DumpToGPU();
+
     /* Prepare cuda alloca */
     cuda_Allocator cuda_allocator(pack.sequences.size() * pack.max_seq_size_bits, num_threads, pack.max_seq_size_bits);
 
     /* convert pack to cuda_Data */
-    cuda_Data data{pack};
 
     /* Prepare tries */
     std::vector<cuda_Trie> tries;
@@ -180,7 +184,7 @@ static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnHost(const
     cuda_Trie final_trie{};
 
     std::cout << "Merging tries..." << std::endl;
-    final_trie.MergeByPrefixHost(tries, power_of_2);
+    final_trie.MergeByPrefixHost(cuda_allocator, data,tries, power_of_2);
 
     const auto t_build_end = std::chrono::high_resolution_clock::now();
 
@@ -192,7 +196,6 @@ static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnHost(const
     const auto t_transfer_start = std::chrono::high_resolution_clock::now();
 
     cuda_Trie *d_trie = final_trie.DumpToGpu();
-    cuda_Data *d_data = data.DumpToGPU();
     cuda_Allocator *d_allocator = cuda_allocator.DumpToGPU();
 
     data.DeallocHost();
@@ -270,16 +273,17 @@ std::vector<std::tuple<uint32_t, uint32_t> > Hamming1Distance(cuda_Trie *d_trie,
 
     /* Process solutions */
     std::vector<std::tuple<uint32_t, uint32_t> > solutions;
-    uint32_t *h_sol;
-    CUDA_ASSERT_SUCCESS(cudaMemcpy(&h_sol, d_mem_block, cuda_Solution::GetMemBlockSize(mgr_data.num_solutions),
+    std::vector<uint32_t> h_sol;
+    h_sol.resize(cuda_Solution::GetMemBlockSize(mgr_data.num_solutions));
+    CUDA_ASSERT_SUCCESS(cudaMemcpy(h_sol.data(), d_mem_block, cuda_Solution::GetMemBlockSize(mgr_data.num_solutions),
         cudaMemcpyDeviceToHost));
 
     for (size_t idx = 0; idx < mgr_data.num_solutions; ++idx) {
         const uint32_t idx1 = h_sol[idx * 2];
         const uint32_t idx2 = h_sol[idx * 2 + 1];
 
-        if (idx1 == INT_MAX || idx2 == INT_MAX) {
-            /* Solution are terminated by INT_MAX */
+        if (idx1 == UINT32_MAX || idx2 == UINT32_MAX) {
+            /* Solution are terminated by UINT32_MAX */
             break;
         }
 

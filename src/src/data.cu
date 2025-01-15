@@ -8,11 +8,11 @@
 std::tuple<cuda_Solution *, uint32_t *> cuda_Solution::DumpToGPU(const size_t num_solutions) {
     uint32_t *d_data{};
     CUDA_ASSERT_SUCCESS(cudaMalloc(&d_data, GetMemBlockSize(num_solutions)));
-    CUDA_ASSERT_SUCCESS(cudaMemset(d_data, INT_MAX, GetMemBlockSize(num_solutions)));
+    CUDA_ASSERT_SUCCESS(cudaMemset(d_data, UINT32_MAX, GetMemBlockSize(num_solutions)));
 
     cuda_Solution *d_solutions{};
     CUDA_ASSERT_SUCCESS(cudaMalloc(&d_solutions, sizeof(cuda_Solution)));
-    CUDA_ASSERT_SUCCESS(cudaMemcpy(d_solutions->_data, &d_data, sizeof(uint32_t *), cudaMemcpyHostToDevice));
+    CUDA_ASSERT_SUCCESS(cudaMemcpy(&d_solutions->_data, &d_data, sizeof(uint32_t *), cudaMemcpyHostToDevice));
 
     return {d_solutions, d_data};
 }
@@ -21,14 +21,31 @@ cuda_Allocator::cuda_Allocator(const uint32_t max_nodes, const uint32_t max_thre
                                const uint32_t max_node_per_thread): _max_nodes(max_nodes),
                                                                     _max_threads(max_threads),
                                                                     _max_node_per_thread(max_node_per_thread) {
-    _data = new Node_[max_nodes + 1];
     _node_counters = new uint32_t[max_threads];
     _thread_nodes = new uint32_t[max_threads];
     _thread_tails = new uint32_t[max_threads];
     _idxes = new uint32_t[max_threads];
 
-    const size_t total_mem_used = (4 * max_threads * sizeof(uint32_t)) + ((max_nodes + 1) * sizeof(Node_));
-    std::cout << "Allocated " << total_mem_used / (1024 * 1024) << " mega bytes for cuda_Allocator" << std::endl;
+    const size_t helper_size = (4 * max_threads * sizeof(uint32_t));
+    const size_t expected_total_mem_used = helper_size + ((max_nodes + 1) * sizeof(Node_));
+    size_t free_mem;
+
+    CUDA_ASSERT_SUCCESS(cudaMemGetInfo(&free_mem, nullptr));
+
+    size_t total_mem_used = expected_total_mem_used;
+    if (expected_total_mem_used > free_mem) {
+        total_mem_used = 8 * free_mem / 10;
+        const size_t mem_for_nodes = total_mem_used - helper_size;
+        _max_nodes = mem_for_nodes / sizeof(Node_) - 1;
+
+        std::cout << "Reduced number of nodes to " << _max_nodes << " from " << max_nodes << std::endl;
+    }
+
+    _data = new Node_[_max_nodes + 1];
+
+    std::cout << "Allocated " << total_mem_used / (1024 * 1024) << " mega bytes for cuda_Allocator" <<
+            std::endl;
+    std::cout << "Expected was " << expected_total_mem_used / (1024 * 1024) << " mega bytes" << std::endl;
 
     uint32_t last_node = 1;
     /* prepare data for nodes */
@@ -233,7 +250,7 @@ cuda_Data *cuda_Data::DumpToGPU() const {
 
 uint32_t *cuda_Data::GetDataPtrHost(const cuda_Data *d_data) {
     uint32_t *ptr;
-    CUDA_ASSERT_SUCCESS(cudaMemcpy(&ptr, d_data->_data, sizeof(uint32_t *), cudaMemcpyDeviceToHost));
+    CUDA_ASSERT_SUCCESS(cudaMemcpy(&ptr, &d_data->_data, sizeof(uint32_t *), cudaMemcpyDeviceToHost));
     return ptr;
 }
 

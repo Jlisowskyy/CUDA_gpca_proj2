@@ -29,7 +29,8 @@ public:
 
     cuda_Trie *DumpToGpu();
 
-    void MergeByPrefixHost(const std::vector<cuda_Trie> &tries, uint32_t prefix_len);
+    void MergeByPrefixHost(cuda_Allocator &allocator, const cuda_Data &data, std::vector<cuda_Trie> &tries,
+                           uint32_t prefix_len);
 
     // ------------------------------
     // private methods
@@ -40,7 +41,6 @@ private:
     // ------------------------------
 
     uint32_t _root_idx{};
-    Node_ *_nodes{};
 };
 
 #endif // CUDA_TRIE_CUH

@@ -96,5 +96,35 @@ cuda_Trie *cuda_Trie::DumpToGpu() {
     return nullptr;
 }
 
-void cuda_Trie::MergeByPrefixHost(const std::vector<cuda_Trie> &tries, uint32_t prefix_len) {
+void cuda_Trie::MergeByPrefixHost(cuda_Allocator &allocator, const cuda_Data &data, std::vector<cuda_Trie> &tries,
+    uint32_t prefix_len) {
+    static const auto ExtractBit = [](const size_t item, const size_t idx) {
+        return (item >> idx) & 1;
+    };
+
+    _root_idx = allocator.AllocateNode(0);
+
+    for (uint32_t idx = 0; idx < tries.size(); ++idx) {
+        cuda_Trie &trie = tries[idx];
+        const uint32_t root_idx = trie._root_idx;
+        trie._root_idx = 0;
+
+        if (!root_idx) {
+            continue;
+        }
+
+        uint32_t* node_idx = &_root_idx;
+        uint32_t bit = 0;
+        while (bit < prefix_len) {
+            const bool value = ExtractBit(idx, bit++);
+
+            if (!allocator[*node_idx].next[value]) {
+                allocator[*node_idx].next[value] = allocator.AllocateNode(0);
+            }
+
+            node_idx = &allocator[*node_idx].next[value];
+        }
+
+        *node_idx = root_idx;
+    }
 }
