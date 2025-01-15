@@ -3,6 +3,7 @@
 
 /* external includes */
 #include <barrier>
+#include <iostream>
 
 std::tuple<cuda_Solution *, uint32_t *> cuda_Solution::DumpToGPU(const size_t num_solutions) {
     uint32_t *d_data{};
@@ -26,6 +27,9 @@ cuda_Allocator::cuda_Allocator(const uint32_t max_nodes, const uint32_t max_thre
     _thread_tails = new uint32_t[max_threads];
     _idxes = new uint32_t[max_threads];
 
+    const size_t total_mem_used = (4 * max_threads * sizeof(uint32_t)) + ((max_nodes + 1) * sizeof(Node_));
+    std::cout << "Allocated " << total_mem_used / (1024 * 1024) << " mega bytes for cuda_Allocator" << std::endl;
+
     uint32_t last_node = 1;
     /* prepare data for nodes */
     for (uint32_t t_idx = 0; t_idx < max_threads; ++t_idx) {
@@ -38,6 +42,7 @@ cuda_Allocator::cuda_Allocator(const uint32_t max_nodes, const uint32_t max_thre
         for (uint32_t node_idx = 0; node_idx < max_node_per_thread + 1; ++node_idx) {
             _data[t_node_idx].seq_idx = UINT32_MAX;
             _data[t_node_idx].next[0] = last_node;
+            _data[t_node_idx].next[1] = 0;
             t_node_idx = last_node++;
 
             assert(last_node <= max_nodes && "DETECTED OVERFLOW");
@@ -128,7 +133,7 @@ void cuda_Allocator::Consolidate(const uint32_t t_idx) {
     /* No need to wait as each thread is working on its own space */
 }
 
-void cuda_Allocator::ConsolidateHost(const uint32_t t_idx, std::barrier<> &barrier) {
+void cuda_Allocator::ConsolidateHost(const uint32_t t_idx, std::barrier<> &barrier, bool isLastRun) {
     /* wait for all threads to finish using allocator */
     barrier.arrive_and_wait();
 
@@ -138,7 +143,11 @@ void cuda_Allocator::ConsolidateHost(const uint32_t t_idx, std::barrier<> &barri
     }
 
     /* wait for first thread to update global data */
-    barrier.arrive_and_wait();
+    if (isLastRun) {
+        barrier.arrive_and_drop();
+    } else {
+        barrier.arrive_and_wait();
+    }
 
     /* each of threads will clean up its allocator space */
     _cleanUpOwnSpace(t_idx);
@@ -163,10 +172,11 @@ void cuda_Allocator::_cleanUpOwnSpace(const uint32_t t_idx) {
     for (node_idx = _idxes[t_idx]; node_idx < range - 1; ++node_idx) {
         _data[node_idx].seq_idx = UINT32_MAX;
         _data[node_idx].next[0] = node_idx;
+        _data[node_idx].next[1] = 0;
     }
 
     /* Connect tail with new list */
-    uint32_t& tail = _thread_tails[t_idx];
+    uint32_t &tail = _thread_tails[t_idx];
     _data[tail].next[0] = _idxes[t_idx];
 
     /* Update the tail */

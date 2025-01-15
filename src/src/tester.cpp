@@ -12,6 +12,9 @@
 #include <set>
 #include <array>
 
+/* Cuda includes */
+#include <hamming.cuh>
+
 const char *Tester::TestNames[kMaxNumTests]{
     "cpu_single_naive",
     "cpu_naive",
@@ -100,6 +103,17 @@ void Tester::TestCpuTrie_(const BinSequencePack &bin_sequence_pack) {
 
 void Tester::TestGPU_(const BinSequencePack &bin_sequence_pack) {
     std::cout << "TestGPU" << std::endl;
+
+    ProcessSingleTest_(
+        bin_sequence_pack,
+        [](const BinSequencePack &bin_sequence_pack, std::vector<std::pair<size_t, size_t> > &out) {
+            auto result = FindHamming1PairsCUDA(bin_sequence_pack);
+
+            for (const auto [i1, i2]: result) {
+                out.emplace_back(i1, i2);
+            }
+        }
+    );
 }
 
 void Tester::TestTrieBuild_(const BinSequencePack &bin_sequence_pack) {

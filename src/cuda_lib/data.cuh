@@ -10,6 +10,7 @@
 #include <defines.cuh>
 #include <data.hpp>
 #include <barrier>
+#include <iostream>
 
 // ------------------------------
 // GPU data Node
@@ -116,7 +117,19 @@ public:
 
     __device__ void Consolidate(uint32_t t_idx);
 
-    void ConsolidateHost(uint32_t t_idx, std::barrier<> &barrier);
+    void ConsolidateHost(uint32_t t_idx, std::barrier<> &barrier, bool isLastRun);
+
+    HYBRID Node_& operator[](const uint32_t idx) {
+        assert(idx != 0 && "NULL POINTER DEREFERENCE DETECTED");
+        assert(idx < _max_nodes + 1 && "DETECTED OVERFLOW");
+        return _data[idx];
+    }
+
+    HYBRID const Node_& operator[](const uint32_t idx) const {
+        assert(idx != 0 && "NULL POINTER DEREFERENCE DETECTED");
+        assert(idx < _max_nodes + 1 && "DETECTED OVERFLOW");
+        return _data[idx];
+    }
 
     // ------------------------------
     // Private methods
@@ -228,6 +241,9 @@ public:
               num_sequences + (32 - num_sequences % 32) % 32),
           _max_sequence_length(max_sequence_length) {
         _data = new uint32_t[_num_sequences_padded32 * (_max_sequence_length + 1)];
+
+        size_t total_mem_used = _num_sequences_padded32 * (_max_sequence_length + 1) * sizeof(uint32_t);
+        std::cout << "Allocated " << total_mem_used / (1024 * 1024) << " mega bytes for sequences" << std::endl;
     }
 
     explicit cuda_Data(const BinSequencePack &pack);

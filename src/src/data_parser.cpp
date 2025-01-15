@@ -49,6 +49,11 @@ BinSequencePack DataParser::ParseData(const char *path) const {
             "Number of sequences is too low. Expected minimum: " + std::to_string(kMinNumSequences));
     }
 
+    size_t total_mem;
+    for (const auto &sequence: data.sequences) {
+        total_mem += sequence.GetSizeWords() * sizeof(uint64_t);
+    }
+
     return data;
 }
 

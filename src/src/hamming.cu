@@ -11,6 +11,12 @@
 #include <iostream>
 #include <barrier>
 #include <bit>
+#include <errno.h>
+
+static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> InitHamming(const BinSequencePack &pack);
+
+static std::vector<std::tuple<uint32_t, uint32_t> > Hamming1Distance(cuda_Trie *d_trie, cuda_Data *d_data,
+                                                                     cuda_Allocator *d_allocator);
 
 // ------------------------------
 // Helpers
@@ -58,6 +64,7 @@ static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnDevice(
     cuda_Allocator allocator(mgr_data.max_nodes, mgr_data.max_threads, mgr_data.max_nodes_per_thread);
 
     /* prepare GPU data */
+    std::cout << "Preparing GPU data..." << std::endl;
     const auto t_mem_start = std::chrono::high_resolution_clock::now();
 
     cuda_Trie *d_trie;
@@ -71,6 +78,7 @@ static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnDevice(
             << std::chrono::duration_cast<std::chrono::milliseconds>(t_mem_end - t_mem_start).count() << "ms"
             << std::endl;
 
+    std::cout << "Building trie..." << std::endl;
     const auto t_start = std::chrono::high_resolution_clock::now();
 
     /* start trie build */
@@ -103,6 +111,9 @@ static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnHost(const
     const uint64_t power_of_2 = std::countr_zero(num_threads);
     const uint32_t prefix_mask = _getMask(power_of_2);
 
+    std::cout << "Preparing data..." << std::endl;
+    const auto t_build_start = std::chrono::high_resolution_clock::now();
+
     /* split sequences into `num_threads` buckets */
     StabAllocator<Node<uint32_t> > allocator(pack.sequences.size() + num_threads);
 
@@ -116,7 +127,9 @@ static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnHost(const
 
     /* Prepare thread pool */
     ThreadPool pool(num_threads);
-    std::barrier barrier(num_threads);
+    std::barrier barrier(static_cast<ptrdiff_t>(num_threads));
+    std::atomic<int32_t> thread_counter;
+    thread_counter.store(static_cast<int32_t>(num_threads));
 
     /* Prepare cuda alloca */
     cuda_Allocator cuda_allocator(pack.sequences.size() * pack.max_seq_size_bits, num_threads, pack.max_seq_size_bits);
@@ -127,6 +140,8 @@ static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnHost(const
     /* Prepare tries */
     std::vector<cuda_Trie> tries;
     tries.resize(num_threads);
+
+    std::cout << "Sorting sequences..." << std::endl;
 
     /* Run threads */
     pool.RunThreads([&](const uint32_t thread_idx) {
@@ -141,6 +156,7 @@ static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnHost(const
             for (size_t b_idx = 0; b_idx < buckets.size(); ++b_idx) {
                 std::cout << "Bucket " << b_idx << " size: " << buckets[b_idx].GetSize() << std::endl;
             }
+            std::cout << "Started trie build..." << std::endl;
         }
 
         /* Wait for all threads finish radix sort */
@@ -152,9 +168,9 @@ static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnHost(const
 
         while (!bucket.IsEmpty()) {
             const auto seq_idx = bucket.PopNotSafe();
-            trie.Insert(cuda_allocator, seq_idx, power_of_2, data);
+            trie.Insert(thread_idx, cuda_allocator, seq_idx, power_of_2, data);
 
-            cuda_allocator.ConsolidateHost(thread_idx, barrier);
+            cuda_allocator.ConsolidateHost(thread_idx, barrier, bucket.IsEmpty());
         }
     });
 
@@ -163,9 +179,32 @@ static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnHost(const
     /* merge tries */
     cuda_Trie final_trie{};
 
+    std::cout << "Merging tries..." << std::endl;
     final_trie.MergeByPrefixHost(tries, power_of_2);
 
-    return {final_trie.DumpToGpu(), data.DumpToGPU(), cuda_allocator.DumpToGPU()};
+    const auto t_build_end = std::chrono::high_resolution_clock::now();
+
+    std::cout << "Trie build time using CPU: "
+            << std::chrono::duration_cast<std::chrono::milliseconds>(t_build_end - t_build_start).count() << "ms"
+            << std::endl;
+
+    /* transfer data to GPU */
+    const auto t_transfer_start = std::chrono::high_resolution_clock::now();
+
+    cuda_Trie *d_trie = final_trie.DumpToGpu();
+    cuda_Data *d_data = data.DumpToGPU();
+    cuda_Allocator *d_allocator = cuda_allocator.DumpToGPU();
+
+    data.DeallocHost();
+    cuda_allocator.DeallocHost();
+
+    const auto t_transfer_end = std::chrono::high_resolution_clock::now();
+
+    std::cout << "Memory transfer time: "
+            << std::chrono::duration_cast<std::chrono::milliseconds>(t_transfer_end - t_transfer_start).count() << "ms"
+            << std::endl;
+
+    return {d_trie, d_data, d_allocator};
 }
 
 // ------------------------------
@@ -178,9 +217,11 @@ std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> InitHamming(const BinSequ
     const auto mgr_data = mgr.PrepareTrieBuildData(pack);
 
     if (mgr_data.build_on_device) {
+        std::cout << "Building on device..." << std::endl;
         return _buildOnDevice(mgr_data, pack);
     }
 
+    std::cout << "Building on host..." << std::endl;
     return _buildOnHost(pack);
 }
 
@@ -277,4 +318,9 @@ std::vector<std::tuple<uint32_t, uint32_t> > Hamming1Distance(cuda_Trie *d_trie,
             << std::endl;
 
     return solutions;
+}
+
+std::vector<std::tuple<uint32_t, uint32_t> > FindHamming1PairsCUDA(const BinSequencePack &pack) {
+    const auto [d_trie, d_data, d_alloca] = InitHamming(pack);
+    return Hamming1Distance(d_trie, d_data, d_alloca);
 }

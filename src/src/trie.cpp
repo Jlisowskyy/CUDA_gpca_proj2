@@ -254,6 +254,13 @@ bool Trie::_insert(const uint32_t idx, const uint32_t start_bit_idx) {
         p = &((*p)->next[bit]);
     }
 
+    if (bit_idx == sequence.GetSizeBits() && bit_idx == oldSequence.GetSizeBits()) {
+        /* we reached the end of both sequences and no difference was found assign on of them and exit */
+        (*p)->idx = idx;
+
+        return true;
+    }
+
     if (bit_idx == oldSequence.GetSizeBits()) {
         /* we reached the end of the old sequence */
         (*p)->idx = oldNode->idx;
@@ -271,7 +278,6 @@ bool Trie::_insert(const uint32_t idx, const uint32_t start_bit_idx) {
     }
 
     /* we reached the difference */
-    assert(!(bit_idx == oldSequence.GetSizeBits() && bit_idx == sequence.GetSizeBits()));
     (*p)->next[oldSequence.GetBit(bit_idx)] = oldNode;
     (*p)->next[sequence.GetBit(bit_idx)] = _allocateNode(idx);
 

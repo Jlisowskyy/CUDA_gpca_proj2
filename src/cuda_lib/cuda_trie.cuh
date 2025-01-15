@@ -21,13 +21,15 @@ public:
     // class interaction
     // ------------------------------
 
-    HYBRID bool Insert(cuda_Allocator &allocator, uint32_t seq_idx, uint32_t bit_idx, const cuda_Data &data);
+    HYBRID bool Insert(uint32_t t_idx, cuda_Allocator &allocator, uint32_t seq_idx, uint32_t start_bit_idx,
+                       const cuda_Data &data);
 
-    __device__ void FindPairs(uint32_t seq_idx, const cuda_Data &data, cuda_Solution &solutions);
+    __device__ void FindPairs(uint32_t seq_idx, const cuda_Data &data, cuda_Solution &solutions) {
+    }
 
     cuda_Trie *DumpToGpu();
 
-    void MergeByPrefixHost(const std::vector<cuda_Trie>& tries, uint32_t prefix_len);
+    void MergeByPrefixHost(const std::vector<cuda_Trie> &tries, uint32_t prefix_len);
 
     // ------------------------------
     // private methods
@@ -38,7 +40,6 @@ private:
     // ------------------------------
 
     uint32_t _root_idx{};
-    cuda_Data *_data{};
     Node_ *_nodes{};
 };
 
