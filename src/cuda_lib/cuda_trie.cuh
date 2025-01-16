@@ -71,6 +71,12 @@ public:
     void MergeByPrefixHost(cuda_Allocator &allocator, const cuda_Data &data, std::vector<cuda_Trie> &tries,
                            uint32_t prefix_len);
 
+    [[nodiscard]] std::string DumpToDot(const cuda_Allocator &allocator, const cuda_Data &data,
+                                        const std::string &graph_name = "Trie") const;
+
+    [[nodiscard]] bool DumpToDotFile(const cuda_Allocator &allocator, const cuda_Data &data,
+                                     const std::string &filename, const std::string &graph_name = "Trie") const;
+
     // ------------------------------
     // private methods
     // ------------------------------

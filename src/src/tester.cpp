@@ -14,6 +14,7 @@
 
 /* Cuda includes */
 #include <hamming.cuh>
+#include <cuda_tests.cuh>
 
 const char *Tester::TestNames[kMaxNumTests]{
     "cpu_single_naive",
@@ -24,6 +25,7 @@ const char *Tester::TestNames[kMaxNumTests]{
     "trie_build",
     "test_malloc",
     "test_alloc",
+    "test_cuda_data",
 };
 
 Tester::TestFuncT Tester::TestFuncs[kMaxNumTests]{
@@ -34,10 +36,11 @@ Tester::TestFuncT Tester::TestFuncs[kMaxNumTests]{
     &Tester::TestGPU_,
     &Tester::TestTrieBuild_,
     &Tester::TestMalloc_,
-    &Tester::TestAlloc,
+    &Tester::TestAlloc_,
+    &Tester::TestCudaData_,
 };
 
-size_t Tester::NumTests = 8;
+size_t Tester::NumTests = 9;
 
 void Tester::RunTests(const std::vector<const char *> &test_names, const BinSequencePack &bin_sequence_pack) {
     for (const auto &test_name: test_names) {
@@ -181,7 +184,7 @@ void Tester::TestMalloc_([[maybe_unused]] const BinSequencePack &bin_sequence_pa
     }
 }
 
-void Tester::TestAlloc(const BinSequencePack &bin_sequence_pack) {
+void Tester::TestAlloc_(const BinSequencePack &bin_sequence_pack) {
     static constexpr size_t kNumAllocs = 1'000'000;
     static constexpr size_t kNumThreads = 20;
     static constexpr size_t kMemToAlloc = 2048 * kMbInBytes;
@@ -231,6 +234,10 @@ void Tester::TestAlloc(const BinSequencePack &bin_sequence_pack) {
 
     /* cleanup allocator */
     delete alloca;
+}
+
+void Tester::TestCudaData_(const BinSequencePack &bin_sequence_pack) {
+    TestCudaData(bin_sequence_pack);
 }
 
 void Tester::RunTest_(const char *test_name, const BinSequencePack &bin_sequence_pack) {

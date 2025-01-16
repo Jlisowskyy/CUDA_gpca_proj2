@@ -1,6 +1,12 @@
 /* internal includes */
 #include <cuda_trie.cuh>
 
+/* external includes */
+#include <sstream>
+#include <string>
+#include <functional>
+#include <fstream>
+
 bool cuda_Trie::Insert(const uint32_t t_idx, cuda_Allocator &allocator, const uint32_t seq_idx,
                        const uint32_t start_bit_idx,
                        const cuda_Data &data) {
@@ -36,10 +42,16 @@ bool cuda_Trie::Insert(const uint32_t t_idx, cuda_Allocator &allocator, const ui
         return true;
     }
 
+    if (sequence.Compare(data[allocator[*node_idx].seq_idx], bit_idx)) {
+        /* we found node with assigned sequence */
+        return true;
+    }
+
     /* we found node with assigned sequence */
     const uint32_t old_node_idx = *node_idx;
-    const auto old_seq = data[old_node_idx];
+    const auto old_seq = data[allocator[old_node_idx].seq_idx];
     *node_idx = allocator.AllocateNode(t_idx);
+    assert(allocator[old_node_idx].next[0] == 0 && allocator[old_node_idx].next[1] == 0);
 
     while (bit_idx < sequence.GetSequenceLength() &&
            bit_idx < old_seq.GetSequenceLength() &&
@@ -60,12 +72,11 @@ bool cuda_Trie::Insert(const uint32_t t_idx, cuda_Allocator &allocator, const ui
 
     if (bit_idx == old_seq.GetSequenceLength()) {
         /* we reached the end of the old sequence */
+        assert(allocator[*node_idx].seq_idx == UINT32_MAX);
 
         allocator[*node_idx].seq_idx = allocator[old_node_idx].seq_idx;
-
-        const uint32_t new_node_idx = allocator.AllocateNode(t_idx);
-        allocator[new_node_idx].seq_idx = seq_idx;
-        allocator[*node_idx].next[sequence.GetBit(bit_idx)] = new_node_idx;
+        allocator[old_node_idx].seq_idx = seq_idx;
+        allocator[*node_idx].next[sequence.GetBit(bit_idx)] = old_node_idx;
 
         return true;
     }
@@ -74,10 +85,7 @@ bool cuda_Trie::Insert(const uint32_t t_idx, cuda_Allocator &allocator, const ui
         /* we reached the end of the new sequence */
 
         allocator[*node_idx].seq_idx = seq_idx;
-
-        const uint32_t new_node_idx = allocator.AllocateNode(t_idx);
-        allocator[new_node_idx].seq_idx = allocator[old_node_idx].seq_idx;
-        allocator[*node_idx].next[old_seq.GetBit(bit_idx)] = new_node_idx;
+        allocator[*node_idx].next[old_seq.GetBit(bit_idx)] = old_node_idx;
 
         return true;
     }
@@ -86,8 +94,9 @@ bool cuda_Trie::Insert(const uint32_t t_idx, cuda_Allocator &allocator, const ui
     allocator[*node_idx].next[old_seq.GetBit(bit_idx)] = old_node_idx;
 
     const uint32_t new_node_idx = allocator.AllocateNode(t_idx);
-    allocator[*node_idx].next[sequence.GetBit(bit_idx)] = new_node_idx;
     allocator[new_node_idx].seq_idx = seq_idx;
+
+    allocator[*node_idx].next[sequence.GetBit(bit_idx)] = new_node_idx;
 
     return true;
 }
@@ -131,4 +140,54 @@ void cuda_Trie::MergeByPrefixHost(cuda_Allocator &allocator, const cuda_Data &da
 
         *node_idx = root_idx;
     }
+}
+
+std::string cuda_Trie::DumpToDot(const cuda_Allocator &allocator, const cuda_Data &data,
+                                 const std::string &graph_name) const {
+    std::stringstream dot;
+
+    dot << "digraph " << graph_name << " {\n";
+    dot << "    node [shape=record];\n";
+
+    auto getNodeName = [](const uint32_t idx) {
+        return "node_" + std::to_string(idx);
+    };
+
+    std::function<void(uint32_t)> dumpNode = [&](uint32_t node_idx) {
+        if (!node_idx) return;
+
+        const auto &node = allocator[node_idx];
+
+        std::string seq_label = (node.seq_idx != UINT32_MAX) ? "\\nseq=" + std::to_string(node.seq_idx) : "";
+
+        dot << "    " << getNodeName(node_idx) << " [label=\""
+                << node_idx << seq_label << "\"];\n";
+
+        for (int i = 0; i < 2; ++i) {
+            if (node.next[i]) {
+                dot << "    " << getNodeName(node_idx) << " -> "
+                        << getNodeName(node.next[i])
+                        << " [label=\"" << i << "\"];\n";
+
+                dumpNode(node.next[i]);
+            }
+        }
+    };
+
+    if (_root_idx) {
+        dumpNode(_root_idx);
+    }
+
+    dot << "}\n";
+
+    return dot.str();
+}
+
+bool cuda_Trie::DumpToDotFile(const cuda_Allocator &allocator, const cuda_Data &data, const std::string &filename,
+                              const std::string &graph_name) const {
+    std::ofstream file(filename);
+    if (!file.is_open()) return false;
+
+    file << DumpToDot(allocator, data, graph_name);
+    return true;
 }

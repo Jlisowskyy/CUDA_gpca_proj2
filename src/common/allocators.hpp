@@ -127,6 +127,10 @@ public:
         return _num_bytes - GetUsedSize();
     }
 
+    void DisplayAllocaInfo() {
+        printf("Total nodes allocated: %zu\n", GetUsedSize() / sizeof(Node<uint32_t>));
+    }
+
 protected:
     std::atomic<char *> _chunk_top{};
     std::atomic<char *> _chunk{};

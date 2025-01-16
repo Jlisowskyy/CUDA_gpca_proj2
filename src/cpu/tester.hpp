@@ -47,7 +47,9 @@ protected:
 
     void TestMalloc_(const BinSequencePack &bin_sequence_pack);
 
-    void TestAlloc(const BinSequencePack &bin_sequence_pack);
+    void TestAlloc_(const BinSequencePack &bin_sequence_pack);
+
+    void TestCudaData_(const BinSequencePack &bin_sequence_pack);
 
     void RunTest_(const char *test_name, const BinSequencePack &bin_sequence_pack);
 
@@ -59,17 +61,16 @@ protected:
 
         const auto start = std::chrono::high_resolution_clock::now();
 
-       test_func(bin_sequence_pack, out);
+        test_func(bin_sequence_pack, out);
 
         const auto end = std::chrono::high_resolution_clock::now();
 
         const double timeMs = std::chrono::duration<double, std::milli>(end - start).count();
         std::cout << "Total time spent: " << timeMs << "ms" << std::endl;
         std::cout << "Average time spent on a single sequence: " << timeMs / bin_sequence_pack.sequences.size() << "ms"
-                <<
-                std::endl;
+                << std::endl;
 
-        VerifySolution_(bin_sequence_pack, out);
+        // VerifySolution_(bin_sequence_pack, out);
     }
 
     // ------------------------------

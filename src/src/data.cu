@@ -208,12 +208,15 @@ void cuda_Allocator::_cleanUpOwnSpace(const uint32_t t_idx) {
 // ------------------------------
 
 cuda_Data::cuda_Data(const BinSequencePack &pack): cuda_Data(pack.sequences.size(),
-                                                             (pack.max_seq_size_bits + 31) / 32) {
+                                                             (pack.max_seq_size_bits + 63) / 32) {
+    std::cout << "Max sequence size: " << pack.max_seq_size_bits << std::endl;
+
     static constexpr uint64_t kBitMask32 = ~static_cast<uint32_t>(0);
 
     for (size_t seq_idx = 0; seq_idx < pack.sequences.size(); ++seq_idx) {
         const auto &sequence = pack.sequences[seq_idx];
         auto fetcher = (*this)[seq_idx];
+        fetcher.GetSequenceLength() = sequence.GetSizeBits();
 
         /* user dwords for better performance */
         for (size_t qword_idx = 0; qword_idx < sequence.GetSizeWords(); ++qword_idx) {

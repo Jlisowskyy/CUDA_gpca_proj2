@@ -57,7 +57,7 @@ void Trie::FindPairs(const uint32_t idx, std::vector<std::pair<size_t, size_t> >
     if (bit_idx == sequence.GetSizeBits()) {
         /* add child if are valid pair */
 
-        for (const auto & i : p->next) {
+        for (const auto &i: p->next) {
             if (i && i->idx != UINT32_MAX && idx < i->idx) {
                 out.emplace_back(i->idx, idx);
             }
@@ -230,7 +230,7 @@ bool Trie::_insert(const uint32_t idx, const uint32_t start_bit_idx) {
         return true;
     }
 
-    if (*p && sequence.Compare((*_sequences)[(*p)->idx], bit_idx)) {
+    if (sequence.Compare((*_sequences)[(*p)->idx], bit_idx)) {
         /* we reached leaf node and the sequence is the same -> leave */
         return false;
     }
@@ -239,6 +239,7 @@ bool Trie::_insert(const uint32_t idx, const uint32_t start_bit_idx) {
     Node_ *oldNode = *p;
     const BinSequence &oldSequence = (*_sequences)[oldNode->idx];
     *p = _allocateNode();
+    assert(oldNode->next[0] == nullptr && oldNode->next[1] == nullptr);
 
     while (bit_idx < oldSequence.GetSizeBits() &&
            bit_idx < sequence.GetSizeBits() &&
@@ -260,14 +261,19 @@ bool Trie::_insert(const uint32_t idx, const uint32_t start_bit_idx) {
 
     if (bit_idx == oldSequence.GetSizeBits()) {
         /* we reached the end of the old sequence */
+        assert((*p)->idx == UINT32_MAX);
+
         (*p)->idx = oldNode->idx;
-        (*p)->next[sequence.GetBit(bit_idx)] = _allocateNode(idx);
+        oldNode->idx = idx;
+        (*p)->next[sequence.GetBit(bit_idx)] = oldNode;
 
         return true;
     }
 
     if (bit_idx == sequence.GetSizeBits()) {
         /* we reached the end of the new sequence */
+        assert((*p)->idx == UINT32_MAX);
+
         (*p)->idx = idx;
         (*p)->next[oldSequence.GetBit(bit_idx)] = oldNode;
 
@@ -290,6 +296,8 @@ void BuildTrieSingleThread(Trie &trie, const std::vector<BinSequence> &sequences
     for (size_t idx = 0; idx < sequences.size(); ++idx) {
         trie.Insert(idx);
     }
+
+    big_mem_chunk_allocator->DisplayAllocaInfo();
 
     if (GlobalConfig.WriteDotFiles) {
         trie.DumpToDot("/tmp/trie.dot");
@@ -346,6 +354,8 @@ void BuildTrieParallel(Trie &trie, const std::vector<BinSequence> &sequences) {
     pool.Wait();
 
     trie.MergeTriesByPrefix(tries, 4);
+
+    big_mem_chunk_allocator->DisplayAllocaInfo();
 
     if (GlobalConfig.WriteDotFiles) {
         trie.DumpToDot("/tmp/trie.dot");

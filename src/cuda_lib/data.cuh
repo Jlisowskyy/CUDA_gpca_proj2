@@ -11,6 +11,7 @@
 #include <data.hpp>
 #include <barrier>
 #include <iostream>
+#include <cstdio>
 
 // ------------------------------
 // GPU data Node
@@ -47,6 +48,8 @@ public:
     // ------------------------------
 
     void FAST_DCALL_ALWAYS PushSolution(const uint32_t idx1, const uint32_t idx2) {
+        printf("sol\n");
+
         const auto address =
                 reinterpret_cast<uint32_t *>(atomicAdd(reinterpret_cast<unsigned long long int *>(&_data), 2));
 
@@ -110,8 +113,11 @@ public:
         const uint32_t idx = _thread_nodes[t_idx];
         assert(idx != 0);
         const uint32_t new_node_idx = _data[idx].next[0];
+        _data[idx].next[0] = 0;
 
         _thread_nodes[t_idx] = new_node_idx;
+
+        assert(_data[idx].next[0] == 0 && _data[idx].next[1] == 0);
         return idx;
     }
 
@@ -129,6 +135,10 @@ public:
         assert(idx != 0 && "NULL POINTER DEREFERENCE DETECTED");
         assert(idx < _max_nodes + 1 && "DETECTED OVERFLOW");
         return _data[idx];
+    }
+
+    HYBRID void DisplayAllocInfo() {
+        printf("Total allocated nodes: %d\n", _last_node - 1);
     }
 
     // ------------------------------
@@ -252,9 +262,12 @@ public:
                        const uint32_t max_sequence_length)
         : _num_sequences(num_sequences),
           _num_sequences_padded32(
-              num_sequences + (32 - num_sequences % 32) % 32),
+              num_sequences + (32 - (num_sequences % 32)) % 32),
           _max_sequence_length(max_sequence_length) {
         _data = new uint32_t[_num_sequences_padded32 * (_max_sequence_length + 1)];
+
+        std::cout << "Num sequences: " << _num_sequences << std::endl;
+        std::cout << "Num sequences padded: " << _num_sequences_padded32 << std::endl;
 
         size_t total_mem_used = _num_sequences_padded32 * (_max_sequence_length + 1) * sizeof(uint32_t);
         std::cout << "Allocated " << total_mem_used / (1024 * 1024) << " mega bytes for sequences" << std::endl;

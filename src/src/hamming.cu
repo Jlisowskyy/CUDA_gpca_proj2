@@ -11,7 +11,9 @@
 #include <iostream>
 #include <barrier>
 #include <bit>
+#include <cstdio>
 #include <errno.h>
+#include <global_conf.hpp>
 
 static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> InitHamming(const BinSequencePack &pack);
 
@@ -48,7 +50,7 @@ __global__ void FindAllHamming1Pairs(const cuda_Trie *out_trie, const cuda_Alloc
     const uint32_t num_sequences = data->GetNumSequences();
 
     for (uint32_t seq_idx = thread_idx; seq_idx < num_sequences; seq_idx += num_threads) {
-        out_trie->FindPairs(seq_idx, *alloca, *data, solutions[seq_idx]);
+        out_trie->FindPairs(seq_idx, *alloca, *data, *solutions);
     }
 }
 
@@ -191,6 +193,13 @@ static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnHost(const
     std::cout << "Trie build time using CPU: "
             << std::chrono::duration_cast<std::chrono::milliseconds>(t_build_end - t_build_start).count() << "ms"
             << std::endl;
+
+    cuda_allocator.DisplayAllocInfo();
+
+    if (GlobalConfig.WriteDotFiles) {
+        const bool result = final_trie.DumpToDotFile(cuda_allocator, data, "/tmp/trie.dot", "TRIE");
+        assert(result);
+    }
 
     /* transfer data to GPU */
     const auto t_transfer_start = std::chrono::high_resolution_clock::now();
