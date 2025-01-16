@@ -7,6 +7,7 @@
 /* external includes */
 #include <iostream>
 #include <barrier>
+#include <defines.hpp>
 #include <fstream>
 #include <queue>
 #include <map>
@@ -334,6 +335,8 @@ void BuildTrieParallel(Trie &trie, const std::vector<BinSequence> &sequences) {
             buckets[key].PushSafe(seq_idx);
         }
 
+        barrier.arrive_and_wait();
+
         if (idx == 0) {
             std::cout << "Bucket stats: " << std::endl;
             for (size_t b_idx = 0; b_idx < buckets.size(); ++b_idx) {
@@ -341,7 +344,19 @@ void BuildTrieParallel(Trie &trie, const std::vector<BinSequence> &sequences) {
             }
         }
 
-        barrier.arrive_and_wait();
+        if constexpr (kIsDebug) {
+            if (idx == 0) {
+                size_t sum{};
+
+                for (const auto &bucket: buckets) {
+                    sum += bucket.GetSize();
+                }
+
+                assert(sum == sequences.size());
+            }
+
+            barrier.arrive_and_wait();
+        }
 
         /* fill the tries */
         auto &bucket = buckets[idx];

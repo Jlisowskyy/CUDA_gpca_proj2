@@ -4,6 +4,7 @@
 /* external includes */
 #include <barrier>
 #include <iostream>
+#include <memory>
 
 std::tuple<cuda_Solution *, uint32_t *> cuda_Solution::DumpToGPU(const size_t num_solutions) {
     uint32_t *d_data{};
@@ -41,7 +42,7 @@ cuda_Allocator::cuda_Allocator(const uint32_t max_nodes, const uint32_t max_thre
         std::cout << "Reduced number of nodes to " << _max_nodes << " from " << max_nodes << std::endl;
     }
 
-    _data = new Node_[_max_nodes + 1];
+    _data = new Node_[_max_nodes + 1]{};
 
     std::cout << "Allocated " << total_mem_used / (1024 * 1024) << " mega bytes for cuda_Allocator" <<
             std::endl;
@@ -51,12 +52,14 @@ cuda_Allocator::cuda_Allocator(const uint32_t max_nodes, const uint32_t max_thre
     /* prepare data for nodes */
     for (uint32_t t_idx = 0; t_idx < max_threads; ++t_idx) {
         uint32_t t_node_idx = _thread_nodes[t_idx] = last_node++;
-        _node_counters[t_idx] = max_node_per_thread;
+        _node_counters[t_idx] = max_node_per_thread + 1;
 
         /* prepare nodes */
         assert(last_node <= max_nodes && "DETECTED OVERFLOW");
         /* Contains one extra node for the thread serving as a sentinel to never find an empty list */
-        for (uint32_t node_idx = 0; node_idx < max_node_per_thread + 1; ++node_idx) {
+        for (uint32_t node_idx = 0; node_idx < max_node_per_thread; ++node_idx) {
+            assert(_data[t_node_idx].next[0] == 0 && _data[t_node_idx].next[1] == 0 && _data[t_node_idx].seq_idx == 0);
+
             _data[t_node_idx].seq_idx = UINT32_MAX;
             _data[t_node_idx].next[0] = last_node;
             _data[t_node_idx].next[1] = 0;
@@ -64,6 +67,11 @@ cuda_Allocator::cuda_Allocator(const uint32_t max_nodes, const uint32_t max_thre
 
             assert(last_node <= max_nodes && "DETECTED OVERFLOW");
         }
+
+        /* ensure that last node is cleaned */
+        assert(_data[t_node_idx].next[0] == 0 && _data[t_node_idx].next[1] == 0 && _data[t_node_idx].seq_idx == 0);
+        _data[t_node_idx].next[0] = _data[t_node_idx].next[1] = 0;
+        _data[t_node_idx].seq_idx = UINT32_MAX;
 
         _thread_tails[t_idx] = t_node_idx;
     }
@@ -176,31 +184,48 @@ void cuda_Allocator::_prepareIdxes() {
     for (uint32_t t_idx = 0; t_idx < _max_threads; ++t_idx) {
         _idxes[t_idx] = last_node;
 
-        last_node += (_max_node_per_thread - _node_counters[t_idx]);
+        const uint32_t used_nodes = (_max_node_per_thread + 1) - _node_counters[t_idx];
+        last_node += used_nodes;
     }
 
     _last_node = last_node;
+    assert(_last_node <= _max_nodes && "DETECTED OVERFLOW");
 }
 
 void cuda_Allocator::_cleanUpOwnSpace(const uint32_t t_idx) {
+    if (_node_counters[t_idx] == _max_node_per_thread + 1) {
+        return;
+    }
+
     /* Connect all nodes from reserved space */
-    const uint32_t range = _idxes[t_idx] + (_max_node_per_thread - _node_counters[t_idx]);
-    uint32_t node_idx;
-    for (node_idx = _idxes[t_idx]; node_idx < range - 1; ++node_idx) {
+    const uint32_t used_nodes = (_max_node_per_thread + 1) - _node_counters[t_idx];
+    const uint32_t range = _idxes[t_idx] + used_nodes;
+    uint32_t node_idx = _idxes[t_idx];
+
+    for (; node_idx < range - 1; ++node_idx) {
+        assert(_data[node_idx].next[0] == 0 && _data[node_idx].next[1] == 0 && _data[node_idx].seq_idx == 0);
+
         _data[node_idx].seq_idx = UINT32_MAX;
-        _data[node_idx].next[0] = node_idx;
+        _data[node_idx].next[0] = node_idx + 1;
         _data[node_idx].next[1] = 0;
     }
 
+    assert(_data[node_idx].next[0] == 0 && _data[node_idx].next[1] == 0 && _data[node_idx].seq_idx == 0);
+    _data[node_idx].seq_idx = UINT32_MAX;
+    _data[node_idx].next[0] = 0;
+    _data[node_idx].next[1] = 0;
+
     /* Connect tail with new list */
     uint32_t &tail = _thread_tails[t_idx];
+
+    assert(_data[tail].next[0] == 0 && _data[tail].next[1] == 0);
     _data[tail].next[0] = _idxes[t_idx];
 
     /* Update the tail */
     tail = node_idx;
 
     /* Reset counter */
-    _node_counters[t_idx] = _max_node_per_thread;
+    _node_counters[t_idx] = _max_node_per_thread + 1;
 }
 
 // ------------------------------

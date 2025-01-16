@@ -12,6 +12,7 @@
 #include <barrier>
 #include <bit>
 #include <cstdio>
+#include <defines.hpp>
 #include <errno.h>
 #include <global_conf.hpp>
 
@@ -131,8 +132,6 @@ static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnHost(const
     /* Prepare thread pool */
     ThreadPool pool(num_threads);
     std::barrier barrier(static_cast<ptrdiff_t>(num_threads));
-    std::atomic<int32_t> thread_counter;
-    thread_counter.store(static_cast<int32_t>(num_threads));
 
     cuda_Data data{pack};
     /* Dump before creating cuda_alloc to know available memory */
@@ -157,6 +156,9 @@ static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnHost(const
             buckets[key].PushSafe(seq_idx);
         }
 
+        /* Wait for all threads finish radix sort */
+        barrier.arrive_and_wait();
+
         if (thread_idx == 0) {
             std::cout << "Bucket stats: " << std::endl;
             for (size_t b_idx = 0; b_idx < buckets.size(); ++b_idx) {
@@ -165,8 +167,19 @@ static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnHost(const
             std::cout << "Started trie build..." << std::endl;
         }
 
-        /* Wait for all threads finish radix sort */
-        barrier.arrive_and_wait();
+        if constexpr (kIsDebug) {
+            if (thread_idx == 0) {
+                size_t sum{};
+
+                for (const auto &bucket: buckets) {
+                    sum += bucket.GetSize();
+                }
+
+                assert(sum == pack.sequences.size());
+            }
+
+            barrier.arrive_and_wait();
+        }
 
         /* fill the tries */
         auto &bucket = buckets[thread_idx];

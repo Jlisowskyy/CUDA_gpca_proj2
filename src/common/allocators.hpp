@@ -63,7 +63,7 @@ public:
             new_idx
         ));
 
-        ++_counter;
+        reinterpret_cast<std::atomic<uint32_t>*>(&_counter)->fetch_add(1);
     }
 
     ItemT PopNotSafe() {
@@ -71,7 +71,7 @@ public:
         Node<ItemT> *top_node = _alloc->GetItem(current_top);
         _top = top_node->mem_idx;
 
-        --_counter;
+        reinterpret_cast<std::atomic<uint32_t>*>(&_counter)->fetch_sub(1);
         return top_node->item;
     }
 

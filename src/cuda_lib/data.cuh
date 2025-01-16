@@ -108,10 +108,11 @@ public:
     void static DeallocGPU(cuda_Allocator *d_allocator);
 
     [[nodiscard]] FAST_CALL_ALWAYS uint32_t AllocateNode(const uint32_t t_idx) const {
+        assert(_node_counters[t_idx] > 1 && "Empty allocator detected");
         --_node_counters[t_idx];
 
         const uint32_t idx = _thread_nodes[t_idx];
-        assert(idx != 0);
+        assert(idx != 0 && "NULL POINTER DEREFERENCE DETECTED");
         const uint32_t new_node_idx = _data[idx].next[0];
         _data[idx].next[0] = 0;
 
@@ -160,15 +161,10 @@ protected:
     uint32_t *_node_counters{};
     uint32_t *_thread_nodes{};
     uint32_t *_thread_tails{};
+    uint32_t *_idxes{};
 
     uint32_t _max_threads{};
     uint32_t _max_node_per_thread{};
-
-    // ------------------------------
-    // GPU only fields
-    // ------------------------------
-
-    uint32_t *_idxes{};
 };
 
 // ------------------------------
