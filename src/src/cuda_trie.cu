@@ -60,7 +60,7 @@ bool cuda_Trie::Insert(const uint32_t t_idx, cuda_Allocator &allocator, const ui
         const bool bit = sequence.GetBit(bit_idx++);
 
         allocator[*node_idx].next[bit] = allocator.AllocateNode(t_idx);
-        node_idx = &allocator[*node_idx].next[bit];
+        node_idx = allocator[*node_idx].next + bit;
     }
 
     if (bit_idx == sequence.GetSequenceLength() && bit_idx == old_seq.GetSequenceLength()) {

@@ -104,9 +104,16 @@ cuda_Allocator *cuda_Allocator::DumpToGPU() const {
     CUDA_ASSERT_SUCCESS(cudaMemcpy(d_thread_nodes, _thread_nodes, _max_threads * sizeof(uint32_t),
         cudaMemcpyHostToDevice));
 
+    /* copy idxes */
     uint32_t *d_idxes;
     CUDA_ASSERT_SUCCESS(cudaMalloc(&d_idxes, _max_threads * sizeof(uint32_t)));
     CUDA_ASSERT_SUCCESS(cudaMemcpy(d_idxes, _idxes, _max_threads * sizeof(uint32_t), cudaMemcpyHostToDevice));
+
+    /* copy thread_tails */
+    uint32_t *d_thread_tails;
+    CUDA_ASSERT_SUCCESS(cudaMalloc(&d_thread_tails, _max_threads * sizeof(uint32_t)));
+    CUDA_ASSERT_SUCCESS(cudaMemcpy(d_thread_tails, _thread_tails, _max_threads * sizeof(uint32_t),
+        cudaMemcpyHostToDevice));
 
     /* update object */
     CUDA_ASSERT_SUCCESS(cudaMemcpy(&d_allocator->_data, &d_data, sizeof(Node_ *), cudaMemcpyHostToDevice));
@@ -115,6 +122,8 @@ cuda_Allocator *cuda_Allocator::DumpToGPU() const {
     CUDA_ASSERT_SUCCESS(cudaMemcpy(&d_allocator->_thread_nodes, &d_thread_nodes, sizeof(uint32_t *),
         cudaMemcpyHostToDevice));
     CUDA_ASSERT_SUCCESS(cudaMemcpy(&d_allocator->_idxes, &d_idxes, sizeof(uint32_t *), cudaMemcpyHostToDevice));
+    CUDA_ASSERT_SUCCESS(cudaMemcpy(&d_allocator->_thread_tails, &d_thread_tails, sizeof(uint32_t *),
+        cudaMemcpyHostToDevice));
 
     return d_allocator;
 }
@@ -123,13 +132,20 @@ void cuda_Allocator::DeallocGPU(cuda_Allocator *d_allocator) {
     Node_ *d_data;
     uint32_t *d_node_counters;
     uint32_t *d_thread_nodes;
+    uint32_t *d_idxes;
+    uint32_t *d_thread_tails;
 
     CUDA_ASSERT_SUCCESS(cudaMemcpy(&d_data, &d_allocator->_data, sizeof(Node_ *), cudaMemcpyDeviceToHost));
     CUDA_ASSERT_SUCCESS(cudaMemcpy(&d_node_counters, &d_allocator->_node_counters, sizeof(uint32_t *),
         cudaMemcpyDeviceToHost));
     CUDA_ASSERT_SUCCESS(cudaMemcpy(&d_thread_nodes, &d_allocator->_thread_nodes, sizeof(uint32_t *),
         cudaMemcpyDeviceToHost));
+    CUDA_ASSERT_SUCCESS(cudaMemcpy(&d_idxes, &d_allocator->_idxes, sizeof(uint32_t *), cudaMemcpyDeviceToHost));
+    CUDA_ASSERT_SUCCESS(cudaMemcpy(&d_thread_tails, &d_allocator->_thread_tails, sizeof(uint32_t *),
+        cudaMemcpyDeviceToHost));
 
+    CUDA_ASSERT_SUCCESS(cudaFree(d_idxes));
+    CUDA_ASSERT_SUCCESS(cudaFree(d_thread_tails));
     CUDA_ASSERT_SUCCESS(cudaFree(d_data));
     CUDA_ASSERT_SUCCESS(cudaFree(d_node_counters));
     CUDA_ASSERT_SUCCESS(cudaFree(d_thread_nodes));
@@ -159,20 +175,44 @@ void cuda_Allocator::Consolidate(const uint32_t t_idx) {
 }
 
 void cuda_Allocator::ConsolidateHost(const uint32_t t_idx, std::barrier<> &barrier, bool isLastRun) {
+    if (isLastRun) {
+        /* reset node counters for others and leave */
+        _node_counters[t_idx] = _max_node_per_thread + 1;
+
+        /* mark this thread as inactive */
+        _thread_nodes[t_idx] = 0;
+
+        if (t_idx == _cleanup_thread) {
+            /* wait for all threads to finish using allocator and possibly leave */
+            barrier.arrive_and_wait();
+
+            /* Perform last cleaning */
+            _prepareIdxes();
+
+            /* if this is a cleanup thread move ownership to the next thread */
+            /* we are sure all threads that must be done are done at this moment and all other threads will rerun this function */
+            for (size_t idx = 0; idx < _max_threads; ++idx) {
+                if (_thread_nodes[idx] == 0) {
+                    _cleanup_thread = idx;
+                    break;
+                }
+            }
+        }
+
+        barrier.arrive_and_drop();
+        return;
+    }
+
     /* wait for all threads to finish using allocator */
     barrier.arrive_and_wait();
 
     /* first thread will update global data */
-    if (t_idx == 0) {
+    if (t_idx == _cleanup_thread) {
         _prepareIdxes();
     }
 
     /* wait for first thread to update global data */
-    if (isLastRun) {
-        barrier.arrive_and_drop();
-    } else {
-        barrier.arrive_and_wait();
-    }
+    barrier.arrive_and_wait();
 
     /* each of threads will clean up its allocator space */
     _cleanUpOwnSpace(t_idx);
@@ -203,17 +243,19 @@ void cuda_Allocator::_cleanUpOwnSpace(const uint32_t t_idx) {
     uint32_t node_idx = _idxes[t_idx];
 
     for (; node_idx < range - 1; ++node_idx) {
-        assert(_data[node_idx].next[0] == 0 && _data[node_idx].next[1] == 0 && _data[node_idx].seq_idx == 0);
+        Node_ &node = _data[node_idx];
+        assert(node.next[0] == 0 && node.next[1] == 0 && node.seq_idx == 0);
 
-        _data[node_idx].seq_idx = UINT32_MAX;
-        _data[node_idx].next[0] = node_idx + 1;
-        _data[node_idx].next[1] = 0;
+        node.seq_idx = UINT32_MAX;
+        node.next[0] = node_idx + 1;
+        node.next[1] = 0;
     }
 
-    assert(_data[node_idx].next[0] == 0 && _data[node_idx].next[1] == 0 && _data[node_idx].seq_idx == 0);
-    _data[node_idx].seq_idx = UINT32_MAX;
-    _data[node_idx].next[0] = 0;
-    _data[node_idx].next[1] = 0;
+    Node_ &last_node = _data[node_idx];
+    assert(last_node.next[0] == 0 && last_node.next[1] == 0 && last_node.seq_idx == 0);
+    last_node.seq_idx = UINT32_MAX;
+    last_node.next[0] = 0;
+    last_node.next[1] = 0;
 
     /* Connect tail with new list */
     uint32_t &tail = _thread_tails[t_idx];

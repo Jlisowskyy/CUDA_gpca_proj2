@@ -97,6 +97,7 @@ public:
         delete _thread_nodes;
         delete _thread_tails;
 
+        _thread_tails = nullptr;
         _idxes = nullptr;
         _data = nullptr;
         _node_counters = nullptr;
@@ -108,14 +109,16 @@ public:
     void static DeallocGPU(cuda_Allocator *d_allocator);
 
     [[nodiscard]] FAST_CALL_ALWAYS uint32_t AllocateNode(const uint32_t t_idx) const {
-        assert(_node_counters[t_idx] > 1 && "Empty allocator detected");
         --_node_counters[t_idx];
+        assert(_node_counters[t_idx] > 1 && "Empty allocator detected");
 
         const uint32_t idx = _thread_nodes[t_idx];
         assert(idx != 0 && "NULL POINTER DEREFERENCE DETECTED");
-        const uint32_t new_node_idx = _data[idx].next[0];
-        _data[idx].next[0] = 0;
 
+        const uint32_t new_node_idx = _data[idx].next[0];
+        assert(new_node_idx != 0 && "EMPTIED LIST");
+
+        _data[idx].next[0] = 0;
         _thread_nodes[t_idx] = new_node_idx;
 
         assert(_data[idx].next[0] == 0 && _data[idx].next[1] == 0);
@@ -165,6 +168,8 @@ protected:
 
     uint32_t _max_threads{};
     uint32_t _max_node_per_thread{};
+
+    uint32_t _cleanup_thread{};
 };
 
 // ------------------------------
