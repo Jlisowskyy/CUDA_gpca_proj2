@@ -77,6 +77,8 @@ public:
 
     bool Insert(const uint32_t idx, const uint32_t bit_idx = 0) { return _insert(idx, bit_idx); }
 
+    bool Search(uint32_t idx) const;
+
     void FindPairs(uint32_t idx, std::vector<std::pair<size_t, size_t> > &out);
 
     [[nodiscard]] size_t GetSizeMB() const;

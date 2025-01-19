@@ -115,7 +115,7 @@ void cuda_Trie::MergeByPrefixHost(cuda_Allocator &allocator, const cuda_Data &da
         return (item >> idx) & 1;
     };
 
-    _root_idx = allocator.AllocateNode(0);
+    _root_idx = allocator.AllocateNode();
 
     for (uint32_t idx = 0; idx < tries.size(); ++idx) {
         cuda_Trie &trie = tries[idx];
@@ -132,7 +132,7 @@ void cuda_Trie::MergeByPrefixHost(cuda_Allocator &allocator, const cuda_Data &da
             const bool value = ExtractBit(idx, bit++);
 
             if (!allocator[*node_idx].next[value]) {
-                allocator[*node_idx].next[value] = allocator.AllocateNode(0);
+                allocator[*node_idx].next[value] = allocator.AllocateNode();
             }
 
             node_idx = &allocator[*node_idx].next[value];

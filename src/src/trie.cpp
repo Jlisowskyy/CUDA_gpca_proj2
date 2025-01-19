@@ -28,6 +28,22 @@ Trie::~Trie() {
     }
 }
 
+bool Trie::Search(const uint32_t idx) const {
+    const BinSequence &sequence = (*_sequences)[idx];
+    size_t bit_idx = 0;
+
+    const Node_ *p = _root;
+    /* follow the path */
+    while (p && (p->next[0] || p->next[1]) && bit_idx < sequence.GetSizeBits()) {
+        const bool value = sequence.GetBit(bit_idx++);
+
+        /* Continue on main path */
+        p = p->next[value];
+    }
+
+    return p && (p->idx == idx || sequence.Compare((*_sequences)[p->idx]));
+}
+
 void Trie::FindPairs(const uint32_t idx, std::vector<std::pair<size_t, size_t> > &out) {
     const BinSequence &sequence = (*_sequences)[idx];
     size_t bit_idx = 0;

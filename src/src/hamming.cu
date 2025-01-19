@@ -55,9 +55,37 @@ __global__ void FindAllHamming1Pairs(const cuda_Trie *out_trie, const cuda_Alloc
     }
 }
 
+__global__ void TestTrieBuild(const cuda_Trie *trie, const cuda_Data *data, const cuda_Allocator *alloca,
+                              bool *result) {
+    for (size_t idx = 0; idx < data->GetNumSequences(); ++idx) {
+        *result = trie->Search(*alloca, idx, *data);
+    }
+}
+
 // ------------------------------
 // Static functions
 // ------------------------------
+
+static void _testTrie(const size_t num_seq, cuda_Trie *d_trie, cuda_Data *d_data, cuda_Allocator *d_alloca) {
+    bool *d_result;
+    CUDA_ASSERT_SUCCESS(cudaMalloc(&d_result, sizeof(bool) * num_seq));
+    TestTrieBuild<<<1, 1>>>(d_trie, d_data, d_alloca, d_result);
+
+    auto h_result = new bool[num_seq];
+    CUDA_ASSERT_SUCCESS(cudaMemcpy(h_result, d_result, sizeof(bool) * num_seq, cudaMemcpyDeviceToHost));
+    CUDA_ASSERT_SUCCESS(cudaFree(d_result));
+
+    for (size_t idx = 0; idx < num_seq; ++idx) {
+        if (!h_result[idx]) {
+            std::cerr << "Failed to find sequence " << idx << std::endl;
+        }
+    }
+
+    CUDA_ASSERT_SUCCESS(cudaFree(d_trie));
+    cuda_Data::DeallocGPU(d_data);
+    cuda_Allocator::DeallocGPU(d_alloca);
+    delete h_result;
+}
 
 static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnDevice(
     const MgrTrieBuildData &mgr_data, const BinSequencePack &pack) {
@@ -349,4 +377,17 @@ std::vector<std::tuple<uint32_t, uint32_t> > Hamming1Distance(cuda_Trie *d_trie,
 std::vector<std::tuple<uint32_t, uint32_t> > FindHamming1PairsCUDA(const BinSequencePack &pack) {
     const auto [d_trie, d_data, d_alloca] = InitHamming(pack);
     return Hamming1Distance(d_trie, d_data, d_alloca);
+}
+
+void TestCUDATrieCpuBuild(const BinSequencePack &pack) {
+    const auto [d_trie, d_data, d_alloca] = _buildOnHost(pack);
+    _testTrie(pack.sequences.size(), d_trie, d_data, d_alloca);
+}
+
+void TestCUDATrieGPUBuild(const BinSequencePack &pack) {
+    const ThreadMgr mgr{};
+    const auto mgr_data = mgr.PrepareTrieBuildData(pack);
+
+    const auto [d_trie, d_data, d_alloca] = _buildOnDevice(mgr_data, pack);
+    _testTrie(pack.sequences.size(), d_trie, d_data, d_alloca);
 }

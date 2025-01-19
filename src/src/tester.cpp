@@ -26,6 +26,8 @@ const char *Tester::TestNames[kMaxNumTests]{
     "test_malloc",
     "test_alloc",
     "test_cuda_data",
+    "test_trie_build_cpu",
+    "test_trie_build_gpu",
 };
 
 Tester::TestFuncT Tester::TestFuncs[kMaxNumTests]{
@@ -38,9 +40,11 @@ Tester::TestFuncT Tester::TestFuncs[kMaxNumTests]{
     &Tester::TestMalloc_,
     &Tester::TestAlloc_,
     &Tester::TestCudaData_,
+    &Tester::TestCpuTrieBuild_,
+    &Tester::TestGPUTrieBuild_,
 };
 
-size_t Tester::NumTests = 9;
+size_t Tester::NumTests = 11;
 
 void Tester::RunTests(const std::vector<const char *> &test_names, const BinSequencePack &bin_sequence_pack) {
     for (const auto &test_name: test_names) {
@@ -237,7 +241,31 @@ void Tester::TestAlloc_(const BinSequencePack &bin_sequence_pack) {
 }
 
 void Tester::TestCudaData_(const BinSequencePack &bin_sequence_pack) {
+    std::cout << "Testing CUDA data" << std::endl;
+
     TestCudaData(bin_sequence_pack);
+}
+
+void Tester::TestCpuTrieBuild_(const BinSequencePack &bin_sequence_pack) {
+    std::cout << "Testing CPU trie build" << std::endl;
+
+    Trie trie(bin_sequence_pack.sequences);
+    BuildTrieParallel(trie, bin_sequence_pack.sequences);
+
+    for (size_t idx = 0; idx < bin_sequence_pack.sequences.size(); ++idx) {
+        const bool result = trie.Search(idx);
+
+        if (!result) {
+            std::cout << "[ERROR] Sequence not found: " << idx << std::endl;
+        }
+    }
+}
+
+void Tester::TestGPUTrieBuild_(const BinSequencePack &bin_sequence_pack) {
+    std::cout << "Testing GPU trie build" << std::endl;
+
+    TestCUDATrieCpuBuild(bin_sequence_pack);
+    // TestCUDATrieGPUBuild(bin_sequence_pack);
 }
 
 void Tester::RunTest_(const char *test_name, const BinSequencePack &bin_sequence_pack) {

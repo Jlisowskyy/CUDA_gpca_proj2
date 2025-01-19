@@ -126,6 +126,12 @@ public:
         return idx;
     }
 
+    [[nodiscard]] FAST_CALL_ALWAYS uint32_t AllocateNode() {
+        const uint32_t rv = _last_node++;
+        assert(rv <= _max_nodes && "DETECTED OVERFLOW");
+        return rv;
+    }
+
     __device__ void Consolidate(uint32_t t_idx);
 
     void ConsolidateHost(uint32_t t_idx, std::barrier<> &barrier, bool isLastRun);

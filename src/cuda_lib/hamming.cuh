@@ -7,6 +7,10 @@
 #include <tuple>
 #include <vector>
 
-std::vector<std::tuple<uint32_t, uint32_t>> FindHamming1PairsCUDA(const BinSequencePack &pack);
+std::vector<std::tuple<uint32_t, uint32_t> > FindHamming1PairsCUDA(const BinSequencePack &pack);
+
+void TestCUDATrieCpuBuild(const BinSequencePack &pack);
+
+void TestCUDATrieGPUBuild(const BinSequencePack &pack);
 
 #endif //HAMMING_CUH

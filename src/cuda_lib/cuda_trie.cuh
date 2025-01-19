@@ -24,6 +24,20 @@ public:
     HYBRID bool Insert(uint32_t t_idx, cuda_Allocator &allocator, uint32_t seq_idx, uint32_t start_bit_idx,
                        const cuda_Data &data);
 
+    HYBRID bool Search(const cuda_Allocator &allocator, uint32_t seq_idx, const cuda_Data &data) const {
+        const auto sequence = data[seq_idx];
+        uint32_t node_idx = _root_idx;
+        uint32_t bit_idx = 0;
+
+        /* traverse existing tree or until we reach the end of the sequence */
+        while (node_idx && (allocator[node_idx].next[0] || allocator[node_idx].next[1])
+               && bit_idx < sequence.GetSequenceLength()) {
+            node_idx = allocator[node_idx].next[sequence.GetBit(bit_idx++)];
+        }
+
+        return node_idx && allocator[node_idx].seq_idx == seq_idx;
+    }
+
     __device__ void FindPairs(const uint32_t seq_idx, const cuda_Allocator &allocator, const cuda_Data &data,
                               cuda_Solution &solutions) const {
         const auto sequence = data[seq_idx];
