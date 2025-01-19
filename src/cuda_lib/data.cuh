@@ -122,6 +122,7 @@ public:
         _thread_nodes[t_idx] = new_node_idx;
 
         assert(_data[idx].next[0] == 0 && _data[idx].next[1] == 0);
+        assert(idx != _thread_tails[t_idx]);
         return idx;
     }
 

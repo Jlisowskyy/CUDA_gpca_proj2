@@ -192,7 +192,7 @@ void cuda_Allocator::ConsolidateHost(const uint32_t t_idx, std::barrier<> &barri
             /* if this is a cleanup thread move ownership to the next thread */
             /* we are sure all threads that must be done are done at this moment and all other threads will rerun this function */
             for (size_t idx = 0; idx < _max_threads; ++idx) {
-                if (_thread_nodes[idx] == 0) {
+                if (_thread_nodes[idx] != 0) {
                     _cleanup_thread = idx;
                     break;
                 }
@@ -233,6 +233,10 @@ void cuda_Allocator::_prepareIdxes() {
 }
 
 void cuda_Allocator::_cleanUpOwnSpace(const uint32_t t_idx) {
+    assert(
+        _data[_thread_nodes[t_idx]].next[0] != 0 && _data[_thread_nodes[t_idx]].next[1] == 0 && _data[_thread_nodes[
+            t_idx]].seq_idx == UINT32_MAX);
+
     if (_node_counters[t_idx] == _max_node_per_thread + 1) {
         return;
     }
