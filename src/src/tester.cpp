@@ -252,12 +252,20 @@ void Tester::TestCpuTrieBuild_(const BinSequencePack &bin_sequence_pack) {
     Trie trie(bin_sequence_pack.sequences);
     BuildTrieParallel(trie, bin_sequence_pack.sequences);
 
+    uint64_t num_errors{};
     for (size_t idx = 0; idx < bin_sequence_pack.sequences.size(); ++idx) {
         const bool result = trie.Search(idx);
+        num_errors += !result;
 
         if (!result) {
             std::cout << "[ERROR] Sequence not found: " << idx << std::endl;
         }
+    }
+
+    if (num_errors == 0) {
+        std::cout << "[SUCCESS] All sequences found" << std::endl;
+    } else {
+        std::cout << "[ERROR] " << num_errors << " sequences not found" << std::endl;
     }
 }
 

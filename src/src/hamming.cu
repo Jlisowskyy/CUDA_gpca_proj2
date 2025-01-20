@@ -58,7 +58,7 @@ __global__ void FindAllHamming1Pairs(const cuda_Trie *out_trie, const cuda_Alloc
 __global__ void TestTrieBuild(const cuda_Trie *trie, const cuda_Data *data, const cuda_Allocator *alloca,
                               bool *result) {
     for (size_t idx = 0; idx < data->GetNumSequences(); ++idx) {
-        *result = trie->Search(*alloca, idx, *data);
+        result[idx] = trie->Search(*alloca, idx, *data);
     }
 }
 
@@ -75,10 +75,18 @@ static void _testTrie(const size_t num_seq, cuda_Trie *d_trie, cuda_Data *d_data
     CUDA_ASSERT_SUCCESS(cudaMemcpy(h_result, d_result, sizeof(bool) * num_seq, cudaMemcpyDeviceToHost));
     CUDA_ASSERT_SUCCESS(cudaFree(d_result));
 
+    uint64_t num_failed{};
     for (size_t idx = 0; idx < num_seq; ++idx) {
+        num_failed += !h_result[idx];
         if (!h_result[idx]) {
             std::cerr << "Failed to find sequence " << idx << std::endl;
         }
+    }
+
+    if (num_failed == 0) {
+        std::cout << "[SUCCESS] All sequences found" << std::endl;
+    } else {
+        std::cout << "[FAILED] " << num_failed << " sequences not found" << std::endl;
     }
 
     CUDA_ASSERT_SUCCESS(cudaFree(d_trie));

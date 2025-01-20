@@ -35,8 +35,8 @@ public:
             node_idx = allocator[node_idx].next[sequence.GetBit(bit_idx++)];
         }
 
-        return node_idx && allocator[node_idx].seq_idx == seq_idx;
-    }
+        return node_idx && (allocator[node_idx].seq_idx == seq_idx ||
+                            sequence.Compare(data[allocator[node_idx].seq_idx]));    }
 
     __device__ void FindPairs(const uint32_t seq_idx, const cuda_Allocator &allocator, const cuda_Data &data,
                               cuda_Solution &solutions) const {

@@ -7,6 +7,26 @@
 #include <functional>
 #include <fstream>
 
+// ------------------------------
+// static functions
+// ------------------------------
+
+[[nodiscard]] FAST_CALL_ALWAYS static uint32_t AllocateNode(cuda_Allocator& allocator, const uint32_t t_idx) {
+    return allocator.AllocateNode(t_idx);
+}
+
+[[nodiscard]] FAST_CALL_ALWAYS static uint32_t AllocateNode(cuda_Allocator& allocator, const uint32_t t_idx, const uint32_t seq_idx) {
+    const uint32_t node_idx = allocator.AllocateNode(t_idx);
+
+    allocator[node_idx].seq_idx = seq_idx;
+    return node_idx;
+}
+
+// ------------------------------
+// implementations
+// ------------------------------
+
+
 bool cuda_Trie::Insert(const uint32_t t_idx, cuda_Allocator &allocator, const uint32_t seq_idx,
                        const uint32_t start_bit_idx,
                        const cuda_Data &data) {
@@ -26,7 +46,7 @@ bool cuda_Trie::Insert(const uint32_t t_idx, cuda_Allocator &allocator, const ui
 
     if (!*node_idx) {
         /* we reached the end of the tree */
-        *node_idx = allocator.AllocateNode(t_idx);
+        *node_idx = AllocateNode(allocator, t_idx);
         allocator[*node_idx].seq_idx = seq_idx;
         return true;
     }
@@ -44,7 +64,7 @@ bool cuda_Trie::Insert(const uint32_t t_idx, cuda_Allocator &allocator, const ui
 
     if (sequence.Compare(data[allocator[*node_idx].seq_idx], bit_idx)) {
         /* we found node with assigned sequence */
-        return true;
+        return false;
     }
 
     /* we found node with assigned sequence */
@@ -59,8 +79,8 @@ bool cuda_Trie::Insert(const uint32_t t_idx, cuda_Allocator &allocator, const ui
         /* add nodes until we reach the difference or there is no more bits to compare */
         const bool bit = sequence.GetBit(bit_idx++);
 
-        allocator[*node_idx].next[bit] = allocator.AllocateNode(t_idx);
-        node_idx = allocator[*node_idx].next + bit;
+        allocator[*node_idx].next[bit] = AllocateNode(allocator, t_idx);
+        node_idx = &allocator[*node_idx].next[bit];
     }
 
     if (bit_idx == sequence.GetSequenceLength() && bit_idx == old_seq.GetSequenceLength()) {
@@ -83,6 +103,7 @@ bool cuda_Trie::Insert(const uint32_t t_idx, cuda_Allocator &allocator, const ui
 
     if (bit_idx == sequence.GetSequenceLength()) {
         /* we reached the end of the new sequence */
+        assert(allocator[*node_idx].seq_idx == UINT32_MAX);
 
         allocator[*node_idx].seq_idx = seq_idx;
         allocator[*node_idx].next[old_seq.GetBit(bit_idx)] = old_node_idx;
@@ -92,11 +113,7 @@ bool cuda_Trie::Insert(const uint32_t t_idx, cuda_Allocator &allocator, const ui
 
     /* we reached the difference */
     allocator[*node_idx].next[old_seq.GetBit(bit_idx)] = old_node_idx;
-
-    const uint32_t new_node_idx = allocator.AllocateNode(t_idx);
-    allocator[new_node_idx].seq_idx = seq_idx;
-
-    allocator[*node_idx].next[sequence.GetBit(bit_idx)] = new_node_idx;
+    allocator[*node_idx].next[sequence.GetBit(bit_idx)] = AllocateNode(allocator, t_idx, seq_idx);
 
     return true;
 }

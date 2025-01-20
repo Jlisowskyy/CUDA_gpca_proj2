@@ -149,7 +149,7 @@ public:
     }
 
     HYBRID void DisplayAllocInfo() {
-        printf("Total allocated nodes: %d\n", _last_node - 1);
+        printf("Total allocated nodes: %d\n", (_last_node - 1) - _max_threads * (_max_node_per_thread + 1));
     }
 
     // ------------------------------
