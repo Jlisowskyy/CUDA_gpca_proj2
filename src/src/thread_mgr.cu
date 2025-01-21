@@ -4,6 +4,7 @@
 #include <thread_pool.hpp>
 #include <allocators.hpp>
 #include <defines.hpp>
+#include <global_conf.cuh>
 
 /* external includes */
 #include <vector>
@@ -11,6 +12,7 @@
 #include <chrono>
 #include <barrier>
 #include <atomic>
+#include <cstring>
 
 // ------------------------------
 // Helpers
@@ -120,7 +122,6 @@ void ThreadMgr::_prepareBuckets(const BinSequencePack &pack, MgrTrieBuildData &d
     double std_dev{};
 
     /* prepare max occupancy */
-    uint32_t max_occup{};
     std::vector<uint32_t> max_occups(num_threads, 0);
 
     /* prepare boundaries */
@@ -156,7 +157,9 @@ void ThreadMgr::_prepareBuckets(const BinSequencePack &pack, MgrTrieBuildData &d
 
         /* calculate statistics */
         const size_t bucket_start = thread_idx * buckets_thread_range;
-        const size_t bucket_end = thread_idx == num_threads - 1 ? data.max_threads : bucket_start + buckets_thread_range;
+        const size_t bucket_end = thread_idx == num_threads - 1
+                                      ? data.max_threads
+                                      : bucket_start + buckets_thread_range;
 
         /* local accumulators */
         uint32_t mean_sum_local{};
@@ -214,33 +217,82 @@ void ThreadMgr::_prepareBuckets(const BinSequencePack &pack, MgrTrieBuildData &d
     data.build_on_device = true;
 
     /* Note: data for gpu is dumped inside the thread pool */
+    const auto t_dump_start = std::chrono::high_resolution_clock::now();
     _dumpBucketsToGpu(buckets, prefixes, data, *std::max_element(max_occups.begin(), max_occups.end()));
+    const auto t_dump_end = std::chrono::high_resolution_clock::now();
+
+    std::cout << "Time spent on gpu data dump for buckets: "
+            << std::chrono::duration_cast<std::chrono::milliseconds>(t_dump_end - t_dump_start).count()
+            << "ms\n";
 }
 
 void ThreadMgr::_dumpBucketsToGpu(Buckets &buckets, const std::vector<uint32_t> &prefixes, MgrTrieBuildData &data,
-    const uint32_t max_occup) const {
-    /* Format data for GPU */
-    auto h_buckets = std::make_unique<uint32_t[]>(data.max_threads * max_occup);
-    auto h_bucket_sizes = std::make_unique<uint32_t[]>(data.max_threads);
-    for (size_t bucket_idx = 0; bucket_idx < data.max_threads; ++bucket_idx) {
-        h_bucket_sizes[bucket_idx] = buckets.GetBucketSize(bucket_idx);
+                                  const uint32_t max_occup) const {
+    /* allocate memory on gpu*/
+    CUDA_ASSERT_SUCCESS(
+        cudaMallocAsync(&data.d_buckets, data.max_threads * max_occup * sizeof(uint32_t), g_cudaGlobalConf->asyncStream
+        ));
+    CUDA_ASSERT_SUCCESS(
+        cudaMallocAsync(&data.d_bucket_prefix_len, data.max_threads * sizeof(uint32_t), g_cudaGlobalConf->asyncStream));
+    CUDA_ASSERT_SUCCESS(
+        cudaMallocAsync(&data.d_bucket_sizes, data.max_threads * sizeof(uint32_t), g_cudaGlobalConf->asyncStream));
 
-        uint32_t cur{};
-        while (!buckets.IsEmpty(bucket_idx)) {
-            h_buckets[bucket_idx * max_occup + cur++] = buckets.PopBucket(bucket_idx);
+    /* prepare pinned memory */
+    uint32_t *h_buckets_pinned;
+    uint32_t *h_bucket_sizes_pinned;
+    uint32_t *h_prefixes_pinned;
+    CUDA_ASSERT_SUCCESS(cudaMallocHost(&h_buckets_pinned, data.max_threads * max_occup * sizeof(uint32_t)));
+    CUDA_ASSERT_SUCCESS(cudaMallocHost(&h_bucket_sizes_pinned, data.max_threads * sizeof(uint32_t)));
+    CUDA_ASSERT_SUCCESS(cudaMallocHost(&h_prefixes_pinned, data.max_threads * sizeof(uint32_t)));
+
+    std::memcpy(h_prefixes_pinned, prefixes.data(), data.max_threads * sizeof(uint32_t));
+
+    CUDA_ASSERT_SUCCESS(cudaMemcpyAsync(data.d_bucket_prefix_len, h_prefixes_pinned,
+        data.max_threads * sizeof(uint32_t), cudaMemcpyHostToDevice, g_cudaGlobalConf->asyncStream));
+
+    /* prepare cpu threads */
+    const uint32_t num_threads = std::thread::hardware_concurrency();
+    ThreadPool pool(num_threads);
+    std::barrier barrier(static_cast<ptrdiff_t>(num_threads));
+
+    const size_t buckets_per_thread = data.max_threads / num_threads;
+    pool.RunThreads([&](const uint32_t thread_idx) {
+        const size_t bucket_start = thread_idx * buckets_per_thread;
+        const size_t bucket_end = thread_idx == num_threads - 1 ? data.max_threads : bucket_start + buckets_per_thread;
+
+        for (size_t bucket_idx = bucket_start; bucket_idx < bucket_end; ++bucket_idx) {
+            h_bucket_sizes_pinned[bucket_idx] = buckets.GetBucketSize(bucket_idx);
         }
-    }
 
-    /* transfer to device */
-    CUDA_ASSERT_SUCCESS(cudaMalloc(&data.d_buckets, data.max_threads * max_occup * sizeof(uint32_t)));
-    CUDA_ASSERT_SUCCESS(cudaMemcpy(data.d_buckets, h_buckets.get(), data.max_threads * max_occup * sizeof(uint32_t),
-        cudaMemcpyHostToDevice));
+        barrier.arrive_and_wait();
 
-    CUDA_ASSERT_SUCCESS(cudaMalloc(&data.d_bucket_prefix_len, data.max_threads * sizeof(uint32_t)));
-    CUDA_ASSERT_SUCCESS(cudaMemcpy(data.d_bucket_prefix_len, prefixes.data(), data.max_threads * sizeof(uint32_t),
-        cudaMemcpyHostToDevice));
 
-    CUDA_ASSERT_SUCCESS(cudaMalloc(&data.d_bucket_sizes, data.max_threads * sizeof(uint32_t)));
-    CUDA_ASSERT_SUCCESS(cudaMemcpy(data.d_bucket_sizes, h_bucket_sizes.get(), data.max_threads * sizeof(uint32_t),
-        cudaMemcpyHostToDevice));
+        if (thread_idx == 0) {
+            CUDA_ASSERT_SUCCESS(
+                cudaMemcpyAsync(data.d_bucket_sizes, h_bucket_sizes_pinned, data.max_threads * sizeof(uint32_t),
+                    cudaMemcpyHostToDevice, g_cudaGlobalConf->asyncStream));
+        }
+
+        for (size_t bucket_idx = bucket_start; bucket_idx < bucket_end; ++bucket_idx) {
+            uint32_t cur{};
+            while (!buckets.IsEmpty(bucket_idx)) {
+                h_buckets_pinned[bucket_idx * max_occup + cur++] = buckets.PopBucket(bucket_idx);
+            }
+        }
+    });
+
+
+    pool.Wait();
+
+    CUDA_ASSERT_SUCCESS(
+        cudaMemcpyAsync(data.d_buckets, h_buckets_pinned, data.max_threads * max_occup * sizeof(uint32_t),
+            cudaMemcpyHostToDevice, g_cudaGlobalConf->asyncStream));
+
+    /* cleanup */
+    CUDA_ASSERT_SUCCESS(cudaStreamSynchronize(g_cudaGlobalConf->asyncStream));
+    CUDA_ASSERT_SUCCESS(cudaStreamDestroy(g_cudaGlobalConf->asyncStream));
+
+    CUDA_ASSERT_SUCCESS(cudaFreeHost(h_buckets_pinned));
+    CUDA_ASSERT_SUCCESS(cudaFreeHost(h_bucket_sizes_pinned));
+    CUDA_ASSERT_SUCCESS(cudaFreeHost(h_prefixes_pinned));
 }
