@@ -73,8 +73,9 @@ protected:
 
 class Buckets {
     struct BucketNode {
-        uint32_t seq_idx;
-        BucketNode *next;
+        BucketNode() = default;
+        uint32_t seq_idx{};
+        BucketNode *next{};
     };
 
     class LinkedList {
@@ -117,7 +118,7 @@ class Buckets {
         }
 
         void MergeLists(LinkedList &dst) {
-            if (&dst == this) {
+            if (&dst == this || !_head) {
                 return;
             }
 

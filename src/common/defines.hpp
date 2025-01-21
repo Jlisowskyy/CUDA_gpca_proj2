@@ -12,7 +12,7 @@ static constexpr bool kIsDebug = false;
 static constexpr bool kIsDebug = true;
 #endif
 
-static constexpr size_t kDefaultAllocChunkSize = 4 * 1024 * 1024; // 4MB
+static constexpr size_t kDefaultAllocChunkSize = 32 * 1024 * 1024; // 32MB
 
 static uint32_t GetMask(const uint32_t num_bits) {
     uint32_t mask{};

@@ -227,7 +227,7 @@ bool Trie::_insert(const uint32_t idx, const size_t thread_idx, const uint32_t s
 
     if (!*p) {
         /* we reached the end of the tree */
-        *p = _allocateNode(idx);
+        *p = _allocateNode(thread_idx, idx);
         return true;
     }
 
@@ -294,7 +294,7 @@ bool Trie::_insert(const uint32_t idx, const size_t thread_idx, const uint32_t s
 
     /* we reached the difference */
     (*p)->next[oldSequence.GetBit(bit_idx)] = oldNode;
-    (*p)->next[sequence.GetBit(bit_idx)] = _allocateNode(idx);
+    (*p)->next[sequence.GetBit(bit_idx)] = _allocateNode(thread_idx, idx);
 
     return true;
 }

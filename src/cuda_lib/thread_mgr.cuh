@@ -3,6 +3,7 @@
 
 /* internal includes */
 #include <data.hpp>
+#include <allocators.hpp>
 
 /* external includes */
 #include <cinttypes>
@@ -24,6 +25,7 @@ struct MgrTrieBuildData {
     /* bucket building management */
     uint32_t *d_buckets{};
     uint32_t *d_bucket_prefix_len{};
+    uint32_t *d_bucket_sizes{};
     bool build_on_device{};
 };
 
@@ -64,10 +66,7 @@ protected:
 
     void _prepareBuckets(const BinSequencePack& pack, MgrTrieBuildData& data) const;
 
-    /* [standard deviation, max_occup] */
-    [[nodiscard]] std::tuple<double, uint32_t> _inspectBuckets(const std::vector<std::vector<uint32_t>>& buckets) const;
-
-    void _dumpBucketsToGpu(const std::vector<std::vector<uint32_t>>& buckets, const std::vector<uint32_t>& prefixes,
+    void _dumpBucketsToGpu(Buckets& buckets, const std::vector<uint32_t>& prefixes,
                            MgrTrieBuildData& data, uint32_t max_occup) const;
 
     // ------------------------------

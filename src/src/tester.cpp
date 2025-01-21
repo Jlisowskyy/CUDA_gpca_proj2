@@ -134,6 +134,8 @@ static void FreeVectors(std::vector<char *> &mems) {
 }
 
 void Tester::TestMalloc_([[maybe_unused]] const BinSequencePack &bin_sequence_pack) {
+    std::cout << "Testing malloc...\n" << std::endl;
+
     static constexpr size_t kNumAllocs = 1'000'000;
     static constexpr size_t kNumThreads = 20;
 
@@ -179,6 +181,8 @@ void Tester::TestMalloc_([[maybe_unused]] const BinSequencePack &bin_sequence_pa
 }
 
 void Tester::TestAlloc_(const BinSequencePack &bin_sequence_pack) {
+    std::cout << "Testing allocation using custom allocator...\n" << std::endl;
+
     static constexpr size_t kNumAllocs = 1'000'000;
     static size_t kNumThreads = std::thread::hardware_concurrency();
 
@@ -322,7 +326,7 @@ static void _splitBatchSingleThread(const BinSequencePack &bin_sequence_pack) {
 }
 
 void Tester::TestBatchSplit_(const BinSequencePack &bin_sequence_pack) {
-    std::cout << "Testing batch split" << std::endl;
+    std::cout << "Testing batch split...\n" << std::endl;
 
     const auto t_multithread_start = std::chrono::high_resolution_clock::now();
     _splitBatchMultithreaded(bin_sequence_pack);
