@@ -43,8 +43,6 @@ protected:
 
     void TestGPU_(const BinSequencePack &bin_sequence_pack);
 
-    void TestTrieBuild_(const BinSequencePack &bin_sequence_pack);
-
     void TestMalloc_(const BinSequencePack &bin_sequence_pack);
 
     void TestAlloc_(const BinSequencePack &bin_sequence_pack);
@@ -54,6 +52,8 @@ protected:
     void TestCpuTrieBuild_(const BinSequencePack &bin_sequence_pack);
 
     void TestGPUTrieBuild_(const BinSequencePack &bin_sequence_pack);
+
+    void TestBatchSplit_(const BinSequencePack &bin_sequence_pack);
 
     void RunTest_(const char *test_name, const BinSequencePack &bin_sequence_pack);
 

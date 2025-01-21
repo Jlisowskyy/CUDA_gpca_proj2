@@ -2,139 +2,194 @@
 #define ALLOCATORS_HPP
 
 #include <cinttypes>
-#include <atomic>
-#include <cstdlib>
 
-template<typename ItemT>
-struct Node {
-    ItemT item{};
-    uint32_t mem_idx{};
-};
+class BigChunkAllocator {
+    struct MemNode {
+        MemNode() = default;
 
-template<typename ItemT>
-class StabAllocator {
-public:
-    explicit StabAllocator(const size_t num_items): _num_items(num_items), _items(new ItemT[num_items + 1]) {
+        ~MemNode() = default;
+
+        uint8_t *mem_chunk{};
+        MemNode *next{};
     };
 
-    uint32_t AllocNotSafe() {
-        return ++_num_allocated;
+public:
+    BigChunkAllocator(const size_t chunk_size, const size_t num_threads) : _chunk_size(chunk_size),
+                                                                           _num_threads(num_threads) {
+        _thread_tops = new size_t[num_threads]{};
+        _heads = new MemNode *[num_threads];
+
+        for (size_t thread_idx = 0; thread_idx < num_threads; ++thread_idx) {
+            _heads[thread_idx] = new MemNode();
+            _heads[thread_idx]->mem_chunk = new uint8_t[chunk_size];
+        }
     }
 
-    uint32_t AllocSafe() {
-        return reinterpret_cast<std::atomic<size_t> *>(&_num_allocated)->fetch_add(1) + 1;
+    ~BigChunkAllocator() {
+        delete [] _thread_tops;
+
+        for (size_t thread_idx = 0; thread_idx < _num_threads; ++thread_idx) {
+            const MemNode *node = _heads[thread_idx];
+
+            while (node) {
+                const MemNode *next = node->next;
+                delete node->mem_chunk;
+                delete node;
+                node = next;
+            }
+        }
+
+        delete [] _heads;
     }
 
-    ItemT *GetBase() const { return _items; }
-    ItemT *GetItem(uint32_t idx) { return _items + idx; }
+    template<typename T, typename... Args>
+    [[nodiscard]] T *Alloc(const size_t thread_idx, Args... args) {
+        const size_t size_needed = sizeof(T);
+        const size_t cur_top = _thread_tops[thread_idx];
 
-    ~StabAllocator() {
-        delete []_items;
+        if (cur_top + size_needed > _chunk_size) {
+            auto *new_node = new MemNode();
+            new_node->mem_chunk = new uint8_t[_chunk_size];
+            new_node->next = _heads[thread_idx];
+
+            _heads[thread_idx] = new_node;
+            _thread_tops[thread_idx] = size_needed;
+            return new(new_node->mem_chunk) T(args...);
+        }
+
+        MemNode *cur_node = _heads[thread_idx];
+        _thread_tops[thread_idx] += size_needed;
+
+        return new(cur_node->mem_chunk + cur_top) T(args...);
     }
 
 protected:
-    size_t _num_items{};
-    size_t _num_allocated{};
-    ItemT *_items{};
+    size_t _chunk_size{};
+    size_t _num_threads{};
+
+    size_t *_thread_tops{};
+    MemNode **_heads{};
 };
 
-template<typename ItemT>
-class ThreadSafeStack {
+class Buckets {
+    struct BucketNode {
+        uint32_t seq_idx;
+        BucketNode *next;
+    };
+
+    class LinkedList {
+    public:
+        LinkedList() = default;
+
+        /* There is no need to dealloc the nodes as they are managed by external allocator */
+        ~LinkedList() = default;
+
+        void Insert(BigChunkAllocator &allocator, const size_t thread_idx, const uint32_t seq_idx) {
+            if (!_tail) {
+                _head = _tail = allocator.Alloc<BucketNode>(thread_idx);
+                _head->seq_idx = seq_idx;
+                _size = 1;
+                return;
+            }
+
+            auto *new_node = allocator.Alloc<BucketNode>(thread_idx);
+            new_node->seq_idx = seq_idx;
+            new_node->next = _head;
+            _head = new_node;
+            ++_size;
+        }
+
+        [[nodiscard]] bool IsEmpty() const {
+            return !_head;
+        }
+
+        [[nodiscard]] uint32_t Pop() {
+            assert(_head != nullptr);
+
+            const uint32_t seq_idx = _head->seq_idx;
+            _head = _head->next;
+            --_size;
+            return seq_idx;
+        }
+
+        [[nodiscard]] size_t GetSize() const {
+            return _size;
+        }
+
+        void MergeLists(LinkedList &dst) {
+            if (&dst == this) {
+                return;
+            }
+
+            if (!dst._head) {
+                dst._head = _head;
+                dst._tail = _tail;
+                dst._size = _size;
+            } else {
+                dst._tail->next = _head;
+                dst._tail = _tail;
+                dst._size += _size;
+            }
+
+            _tail = nullptr;
+            _head = nullptr;
+        }
+
+    protected:
+        size_t _size{};
+        BucketNode *_head{};
+        BucketNode *_tail{};
+    };
+
 public:
-    explicit ThreadSafeStack(StabAllocator<Node<ItemT> > &alloc): _top(alloc.AllocNotSafe()), _alloc(&alloc) {
+    Buckets(const size_t num_threads, const size_t num_buckets, BigChunkAllocator &alloca) : _num_threads(num_threads),
+        _num_buckets(num_buckets), _allocator(&alloca) {
+        _buckets = new LinkedList *[_num_threads];
+        for (size_t thread_idx = 0; thread_idx < _num_threads; ++thread_idx) {
+            _buckets[thread_idx] = new LinkedList[num_buckets]{};
+        }
     }
 
-    bool IsEmpty() {
-        return _alloc->GetItem(_top)->mem_idx == 0;
+    ~Buckets() {
+        for (size_t thread_idx = 0; thread_idx < _num_threads; ++thread_idx) {
+            /* There is no need to dealloc the nodes as they are managed by external allocator */
+            delete []_buckets[thread_idx];
+        }
+        delete []_buckets;
     }
 
-    void PushSafe(const ItemT &item) {
-        uint32_t new_idx = _alloc->AllocSafe();
-        Node<ItemT> *new_node = _alloc->GetItem(new_idx);
-        new_node->item = item;
-
-        uint32_t current_top;
-        do {
-            current_top = _top;
-            new_node->mem_idx = current_top;
-        } while (!std::atomic_compare_exchange_weak(
-            reinterpret_cast<std::atomic<uint32_t> *>(&_top),
-            &current_top,
-            new_idx
-        ));
-
-        reinterpret_cast<std::atomic<uint32_t>*>(&_counter)->fetch_add(1);
+    void PushToBucket(const size_t thread_idx, const size_t bucket_idx, const uint32_t seq_idx) {
+        _buckets[thread_idx][bucket_idx].Insert(*_allocator, thread_idx, seq_idx);
     }
 
-    ItemT PopNotSafe() {
-        uint32_t current_top = _top;
-        Node<ItemT> *top_node = _alloc->GetItem(current_top);
-        _top = top_node->mem_idx;
+    void MergeBuckets() {
+        for (size_t bucket_idx = 0; bucket_idx < _num_buckets; ++bucket_idx) {
+            LinkedList &dst_list = _buckets[0][bucket_idx];
 
-        reinterpret_cast<std::atomic<uint32_t>*>(&_counter)->fetch_sub(1);
-        return top_node->item;
+            for (size_t thread_idx = 1; thread_idx < _num_threads; ++thread_idx) {
+                LinkedList &src_list = _buckets[thread_idx][bucket_idx];
+                src_list.MergeLists(dst_list);
+            }
+        }
     }
 
-    [[nodiscard]] uint32_t GetSize() const {
-        return _counter;
+    [[nodiscard]] uint32_t PopBucket(const size_t bucket_idx) {
+        return _buckets[0][bucket_idx].Pop();
+    }
+
+    [[nodiscard]] bool IsEmpty(const size_t bucket_idx) const {
+        return _buckets[0][bucket_idx].IsEmpty();
+    }
+
+    [[nodiscard]] size_t GetBucketSize(const size_t bucket_idx) const {
+        return _buckets[0][bucket_idx].GetSize();
     }
 
 protected:
-    uint32_t _top{};
-    uint32_t _counter{};
-    StabAllocator<Node<ItemT> > *_alloc{};
-};
-
-class BigMemChunkAllocator {
-public:
-    BigMemChunkAllocator() = default;
-
-    ~BigMemChunkAllocator() {
-        Clear();
-    }
-
-    void Alloc(const size_t num_bytes) {
-        assert(num_bytes > 0);
-
-        _chunk.store(new char[num_bytes]);
-        _chunk_top.store(_chunk.load());
-        _num_bytes = num_bytes;
-    }
-
-    void Clear() {
-        delete[] _chunk;
-        _chunk = nullptr;
-        _chunk_top = nullptr;
-    }
-
-    template<class ItemT, typename... Args>
-    ItemT *AllocItem(Args &&... args) {
-        char *old_ptr = _chunk_top.fetch_add(sizeof(ItemT), std::memory_order_relaxed);
-        assert(_chunk_top <= _chunk.load() + _num_bytes);
-
-        return new(reinterpret_cast<void *>(old_ptr)) ItemT(std::forward<Args>(args)...);
-    }
-
-    [[nodiscard]] size_t GetMaxSize() const {
-        return _num_bytes;
-    }
-
-    [[nodiscard]] size_t GetUsedSize() const {
-        return _chunk_top.load() - _chunk.load();
-    }
-
-    [[nodiscard]] size_t GetFreeSize() const {
-        return _num_bytes - GetUsedSize();
-    }
-
-    void DisplayAllocaInfo() {
-        printf("Total nodes allocated: %zu\n", GetUsedSize() / sizeof(Node<uint32_t>));
-    }
-
-protected:
-    std::atomic<char *> _chunk_top{};
-    std::atomic<char *> _chunk{};
-    size_t _num_bytes{};
+    size_t _num_threads{};
+    size_t _num_buckets{};
+    LinkedList **_buckets{};
+    BigChunkAllocator *_allocator{};
 };
 
 #endif //ALLOCATORS_HPP

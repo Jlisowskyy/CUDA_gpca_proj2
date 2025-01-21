@@ -8,35 +8,7 @@
 #include <iostream>
 
 /* Forward declarations */
-class BigMemChunkAllocator;
-
-static constexpr size_t kMbInBytes = 1024 * 1024;
-static constexpr size_t kDefaultAllocSize = 4 * 2048 * kMbInBytes;
-
-template<class nodeT, size_t arrSize>
-bool CompareTries(const nodeT *rootLeft, const nodeT *rootRight) {
-    if (!rootLeft && !rootRight) {
-        return true;
-    }
-
-    if (!rootLeft || !rootRight) {
-        std::cout << "One of the roots is null" << std::endl;
-        return false;
-    }
-
-    if (rootLeft->idx != rootRight->idx) {
-        std::cout << "Roots have different idx" << std::endl;
-        return false;
-    }
-
-    for (size_t i = 0; i < arrSize; ++i) {
-        if (!CompareTries<nodeT, arrSize>(rootLeft->next[i], rootRight->next[i])) {
-            return false;
-        }
-    }
-
-    return true;
-}
+class BigChunkAllocator;
 
 class Trie {
     // ------------------------------
@@ -49,10 +21,6 @@ class Trie {
         Node_() = default;
 
         explicit Node_(const uint32_t seq_idx) : idx{seq_idx} {
-        }
-
-        bool operator==(const Node_ &n) const {
-            return idx == n.idx;
         }
 
         Node_ *next[NextCount]{};
@@ -75,19 +43,13 @@ public:
     // class interaction
     // ------------------------------
 
-    bool Insert(const uint32_t idx, const uint32_t bit_idx = 0) { return _insert(idx, bit_idx); }
+    bool Insert(const uint32_t idx, const size_t thread_idx, const uint32_t bit_idx = 0) { return _insert(idx, thread_idx, bit_idx); }
 
-    bool Search(uint32_t idx) const;
+    [[nodiscard]] bool Search(uint32_t idx) const;
 
     void FindPairs(uint32_t idx, std::vector<std::pair<size_t, size_t> > &out);
 
-    [[nodiscard]] size_t GetSizeMB() const;
-
     void MergeTriesByPrefix(std::vector<Trie> &tries, size_t prefix_size);
-
-    bool operator==(const Trie &trie) const {
-        return CompareTries<Node_, NextCount>(_root, trie._root);
-    }
 
     void DumpToDot(const std::string &filename) const;
 
@@ -95,7 +57,7 @@ public:
         _is_root_owner = is_owner;
     }
 
-    void SetAllocator(BigMemChunkAllocator *allocator) {
+    void SetAllocator(BigChunkAllocator *allocator) {
         _allocator = allocator;
     }
 
@@ -104,18 +66,18 @@ public:
     // ------------------------------
 
 private:
-    bool _insert(uint32_t idx, uint32_t start_bit_idx);
+    bool _insert(uint32_t idx, size_t thread_idx, uint32_t start_bit_idx);
 
     void _tryToFindPair(Node_ *p, uint32_t idx, uint32_t bit_idx, std::vector<std::pair<size_t, size_t> > &out);
 
     template<typename... Args>
-    [[nodiscard]] Node_ *_allocateNode(Args... args) const;
+    [[nodiscard]] Node_ *_allocateNode(size_t thread_idx, Args... args) const;
 
     // ------------------------------
     // Class fields
     // ------------------------------
 
-    BigMemChunkAllocator*_allocator{};
+    BigChunkAllocator *_allocator{};
     Node_ *_root{};
     const std::vector<BinSequence> *_sequences{};
     bool _is_root_owner{false};

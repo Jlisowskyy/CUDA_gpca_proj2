@@ -22,26 +22,13 @@ static std::vector<std::tuple<uint32_t, uint32_t> > Hamming1Distance(cuda_Trie *
                                                                      cuda_Allocator *d_allocator);
 
 // ------------------------------
-// Helpers
-// ------------------------------
-
-static uint32_t _getMask(const uint32_t num_bits) {
-    uint32_t mask{};
-
-    for (uint32_t idx = 0; idx < num_bits; ++idx) {
-        mask |= static_cast<uint32_t>(1) << idx;
-    }
-
-    return mask;
-}
-
-// ------------------------------
 // Kernels
 // ------------------------------
 
 __global__ void BuildTrieKernel(cuda_Trie *out_trie, uint32_t *buckets, uint32_t *prefix_len, cuda_Data *data,
                                 cuda_Allocator *allocator) {
-    // TODO
+    const uint32_t thread_idx = blockIdx.x * blockDim.x + threadIdx.x;
+
 }
 
 __global__ void FindAllHamming1Pairs(const cuda_Trie *out_trie, const cuda_Allocator *alloca, const cuda_Data *data,
@@ -147,27 +134,23 @@ static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnDevice(
 }
 
 static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnHost(const BinSequencePack &pack) {
-    const uint64_t num_threads = std::bit_floor(std::thread::hardware_concurrency());
-    const uint64_t power_of_2 = std::countr_zero(num_threads);
-    const uint32_t prefix_mask = _getMask(power_of_2);
+    const auto [num_threads, prefix_mask, power_of_2] = GetBatchSplitData();
 
     std::cout << "Preparing data..." << std::endl;
     const auto t_build_start = std::chrono::high_resolution_clock::now();
 
     /* split sequences into `num_threads` buckets */
-    StabAllocator<Node<uint32_t> > allocator(pack.sequences.size() + num_threads);
 
-    /* Prepare buckets */
-    std::vector<ThreadSafeStack<uint32_t> > buckets{};
-    buckets.reserve(num_threads);
+    /* prepare allocator */
+    BigChunkAllocator allocator(kDefaultAllocChunkSize, num_threads);
 
-    for (size_t idx = 0; idx < num_threads; ++idx) {
-        buckets.emplace_back(allocator);
-    }
+    /* prepare buckets */
+    Buckets buckets(num_threads, num_threads, allocator);
 
     /* Prepare thread pool */
     ThreadPool pool(num_threads);
     std::barrier barrier(static_cast<ptrdiff_t>(num_threads));
+    const size_t thread_job_size = pack.sequences.size() / num_threads;
 
     cuda_Data data{pack};
     /* Dump before creating cuda_alloc to know available memory */
@@ -175,8 +158,6 @@ static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnHost(const
 
     /* Prepare cuda alloca */
     cuda_Allocator cuda_allocator(pack.sequences.size() * pack.max_seq_size_bits, num_threads, pack.max_seq_size_bits);
-
-    /* convert pack to cuda_Data */
 
     /* Prepare tries */
     std::vector<cuda_Trie> tries;
@@ -186,46 +167,40 @@ static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnHost(const
 
     /* Run threads */
     pool.RunThreads([&](const uint32_t thread_idx) {
+        const size_t job_start = thread_idx * thread_job_size;
+        const size_t job_end = thread_idx == num_threads - 1 ? pack.sequences.size()
+            : (thread_idx + 1) * thread_job_size;
+
         /* Bucket sorting */
-        for (size_t seq_idx = thread_idx; seq_idx < pack.sequences.size(); seq_idx += num_threads) {
+        for (size_t seq_idx = job_start; seq_idx < job_end; ++seq_idx) {
             const size_t key = pack.sequences[seq_idx].GetWord(0) & prefix_mask;
-            buckets[key].PushSafe(seq_idx);
+            buckets.PushToBucket(thread_idx, key, seq_idx);
         }
 
         /* Wait for all threads finish radix sort */
         barrier.arrive_and_wait();
 
         if (thread_idx == 0) {
+            buckets.MergeBuckets();
+
             std::cout << "Bucket stats: " << std::endl;
-            for (size_t b_idx = 0; b_idx < buckets.size(); ++b_idx) {
-                std::cout << "Bucket " << b_idx << " size: " << buckets[b_idx].GetSize() << std::endl;
+            for (size_t b_idx = 0; b_idx < num_threads; ++b_idx) {
+                std::cout << "Bucket " << b_idx << " size: " << buckets.GetBucketSize(b_idx) << std::endl;
             }
             std::cout << "Started trie build..." << std::endl;
         }
 
-        if constexpr (kIsDebug) {
-            if (thread_idx == 0) {
-                size_t sum{};
-
-                for (const auto &bucket: buckets) {
-                    sum += bucket.GetSize();
-                }
-
-                assert(sum == pack.sequences.size());
-            }
-
-            barrier.arrive_and_wait();
-        }
+        /* wait for bucket merge */
+        barrier.arrive_and_wait();
 
         /* fill the tries */
-        auto &bucket = buckets[thread_idx];
         auto &trie = tries[thread_idx];
 
-        while (!bucket.IsEmpty()) {
-            const auto seq_idx = bucket.PopNotSafe();
+        while (!buckets.IsEmpty(thread_idx)) {
+            const auto seq_idx = buckets.PopBucket(thread_idx);
             trie.Insert(thread_idx, cuda_allocator, seq_idx, power_of_2, data);
 
-            cuda_allocator.ConsolidateHost(thread_idx, barrier, bucket.IsEmpty());
+            cuda_allocator.ConsolidateHost(thread_idx, barrier, buckets.IsEmpty(thread_idx));
         }
     });
 

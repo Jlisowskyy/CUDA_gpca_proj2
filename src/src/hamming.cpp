@@ -79,8 +79,6 @@ void CalculateHammingDistancesSingleThreadTrie(const std::vector<BinSequence> &s
     BuildTrieSingleThread(trie, sequences);
     const auto build_end = std::chrono::high_resolution_clock::now();
 
-    std::cout << "Total tree size in MB " << trie.GetSizeMB() << std::endl;
-
     const auto find_start = std::chrono::high_resolution_clock::now();
     for (size_t idx = 0; idx < sequences.size(); ++idx) {
         trie.FindPairs(idx, out);
@@ -102,8 +100,6 @@ void CalculateHammingDistancesTrie(const std::vector<BinSequence> &sequences,
     const auto build_start = std::chrono::high_resolution_clock::now();
     BuildTrieParallel(trie, sequences);
     const auto build_end = std::chrono::high_resolution_clock::now();
-
-    std::cout << "Total tree size in MB " << trie.GetSizeMB() << std::endl;
 
     const auto find_start = std::chrono::high_resolution_clock::now();
     ThreadPool thread_pool(std::thread::hardware_concurrency());

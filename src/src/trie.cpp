@@ -87,11 +87,6 @@ void Trie::FindPairs(const uint32_t idx, std::vector<std::pair<size_t, size_t> >
     assert((p && p->idx == idx) || sequence.Compare((*_sequences)[p->idx]));
 }
 
-size_t Trie::GetSizeMB() const {
-    static constexpr size_t kBytesInMB = 1024 * 1024;
-    return _allocator->GetUsedSize() / kBytesInMB;
-}
-
 void Trie::_tryToFindPair(Node_ *p, const uint32_t idx, uint32_t bit_idx,
                           std::vector<std::pair<size_t, size_t> > &out) {
     /* Check if we have a valid node */
@@ -120,10 +115,10 @@ void Trie::_tryToFindPair(Node_ *p, const uint32_t idx, uint32_t bit_idx,
 }
 
 template<typename... Args>
-Trie::Node_ *Trie::_allocateNode(Args... args) const {
+Trie::Node_ *Trie::_allocateNode(const size_t thread_idx, Args... args) const {
     assert(_allocator != nullptr);
 
-    auto n = _allocator->AllocItem<Node_>(args...);
+    auto n = _allocator->Alloc<Node_>(thread_idx, args...);
     assert(n != nullptr);
 
     return n;
@@ -137,7 +132,7 @@ void Trie::MergeTriesByPrefix(std::vector<Trie> &tries, const size_t prefix_size
         return (item >> idx) & 1;
     };
 
-    _root = _allocateNode();
+    _root = _allocateNode(0);
 
     for (size_t idx = 0; idx < tries.size(); ++idx) {
         Trie &trie = tries[idx];
@@ -154,7 +149,7 @@ void Trie::MergeTriesByPrefix(std::vector<Trie> &tries, const size_t prefix_size
             const bool value = ExtractBit(idx, bit++);
 
             if (!(*n)->next[value]) {
-                (*n)->next[value] = _allocateNode();
+                (*n)->next[value] = _allocateNode(0);
             }
 
             n = &((*n)->next[value]);
@@ -216,7 +211,7 @@ void Trie::DumpToDot(const std::string &filename) const {
     out.close();
 }
 
-bool Trie::_insert(const uint32_t idx, const uint32_t start_bit_idx) {
+bool Trie::_insert(const uint32_t idx, const size_t thread_idx, const uint32_t start_bit_idx) {
     const BinSequence &sequence = (*_sequences)[idx];
     Node_ **p = &_root;
 
@@ -255,7 +250,7 @@ bool Trie::_insert(const uint32_t idx, const uint32_t start_bit_idx) {
     /* we found node with assigned sequence */
     Node_ *oldNode = *p;
     const BinSequence &oldSequence = (*_sequences)[oldNode->idx];
-    *p = _allocateNode();
+    *p = _allocateNode(thread_idx);
     assert(oldNode->next[0] == nullptr && oldNode->next[1] == nullptr);
 
     while (bit_idx < oldSequence.GetSizeBits() &&
@@ -265,7 +260,7 @@ bool Trie::_insert(const uint32_t idx, const uint32_t start_bit_idx) {
 
         const bool bit = sequence.GetBit(bit_idx++);
 
-        (*p)->next[bit] = _allocateNode();
+        (*p)->next[bit] = _allocateNode(thread_idx);
         p = &((*p)->next[bit]);
     }
 
@@ -305,16 +300,12 @@ bool Trie::_insert(const uint32_t idx, const uint32_t start_bit_idx) {
 }
 
 void BuildTrieSingleThread(Trie &trie, const std::vector<BinSequence> &sequences) {
-    auto *big_mem_chunk_allocator = new BigMemChunkAllocator();
-    big_mem_chunk_allocator->Alloc(kDefaultAllocSize);
-    trie.SetAllocator(big_mem_chunk_allocator);
+    trie.SetAllocator(new BigChunkAllocator(kDefaultAllocChunkSize, 1));
     trie.SetOwner(true);
 
     for (size_t idx = 0; idx < sequences.size(); ++idx) {
-        trie.Insert(idx);
+        trie.Insert(idx, 0);
     }
-
-    big_mem_chunk_allocator->DisplayAllocaInfo();
 
     if (GlobalConfig.WriteDotFiles) {
         trie.DumpToDot("/tmp/trie.dot");
@@ -322,71 +313,67 @@ void BuildTrieSingleThread(Trie &trie, const std::vector<BinSequence> &sequences
 }
 
 void BuildTrieParallel(Trie &trie, const std::vector<BinSequence> &sequences) {
-    StabAllocator<Node<uint32_t> > allocator(sequences.size() + 16);
-    auto *big_mem_chunk_allocator = new BigMemChunkAllocator();
-    big_mem_chunk_allocator->Alloc(kDefaultAllocSize);
+    const auto [num_threads, prefix_mask, power_of_2] = GetBatchSplitData();
 
-    std::vector<ThreadSafeStack<uint32_t> > buckets{};
-    buckets.reserve(16);
-
-    trie.SetAllocator(big_mem_chunk_allocator);
+    /* prepare allocator */
+    auto *allocator = new BigChunkAllocator(kDefaultAllocChunkSize, num_threads);
+    trie.SetAllocator(allocator);
     trie.SetOwner(true);
 
-    for (size_t idx = 0; idx < 16; ++idx) {
-        buckets.emplace_back(allocator);
-    }
+    /* prepare buckets */
+    Buckets buckets(num_threads, num_threads, *allocator);
 
+    /* prepare tries */
     std::vector<Trie> tries{};
-    for (size_t idx = 0; idx < buckets.size(); ++idx) {
+    for (size_t idx = 0; idx < num_threads; ++idx) {
         tries.emplace_back(sequences);
-        tries.back().SetAllocator(big_mem_chunk_allocator);
+        tries.back().SetAllocator(allocator);
     }
 
-    ThreadPool pool(16);
-    std::barrier barrier(16);
-    pool.RunThreads([&](const uint32_t idx) {
+    ThreadPool pool(num_threads);
+    std::barrier barrier(static_cast<ptrdiff_t>(num_threads));
+    const size_t thread_job_size = sequences.size() / num_threads;
+
+    pool.RunThreads([&](const uint32_t thread_idx) {
         /* Bucket sorting */
-        for (size_t seq_idx = idx; seq_idx < sequences.size(); seq_idx += 16) {
-            const size_t key = sequences[seq_idx].GetWord(0) & 0xF;
-            buckets[key].PushSafe(seq_idx);
+        const size_t job_start = thread_idx * thread_job_size;
+        const size_t job_end = thread_idx == num_threads - 1
+                                   ? sequences.size()
+                                   : (thread_idx + 1) * thread_job_size;
+
+        for (size_t seq_idx = job_start; seq_idx < job_end; ++seq_idx) {
+            const size_t key = sequences[seq_idx].GetWord(0) & prefix_mask;
+            buckets.PushToBucket(thread_idx, key, seq_idx);
         }
 
+        /* wait for all threads to finish sorting */
         barrier.arrive_and_wait();
 
-        if (idx == 0) {
-            std::cout << "Bucket stats: " << std::endl;
-            for (size_t b_idx = 0; b_idx < buckets.size(); ++b_idx) {
-                std::cout << "Bucket " << b_idx << " size: " << buckets[b_idx].GetSize() << std::endl;
+        if (thread_idx == 0) {
+            /* merge buckets */
+            buckets.MergeBuckets();
+
+            /* display bucket stats */
+            std::cout << "Bucket stats:\n";
+            for (size_t b_idx = 0; b_idx < num_threads; ++b_idx) {
+                std::cout << "Bucket " << b_idx << " size: " << buckets.GetBucketSize(b_idx) << '\n';
             }
+            std::cout << std::endl;
         }
 
-        if constexpr (kIsDebug) {
-            if (idx == 0) {
-                size_t sum{};
-
-                for (const auto &bucket: buckets) {
-                    sum += bucket.GetSize();
-                }
-
-                assert(sum == sequences.size());
-            }
-
-            barrier.arrive_and_wait();
-        }
+        /* wait for finish merging */
+        barrier.arrive_and_wait();
 
         /* fill the tries */
-        auto &bucket = buckets[idx];
-        while (!bucket.IsEmpty()) {
-            const uint32_t seq_idx = bucket.PopNotSafe();
-            tries[idx].Insert(seq_idx, 4);
+        while (!buckets.IsEmpty(thread_idx)) {
+            const uint32_t seq_idx = buckets.PopBucket(thread_idx);
+            tries[thread_idx].Insert(seq_idx, thread_idx, power_of_2);
         }
     });
 
     pool.Wait();
 
-    trie.MergeTriesByPrefix(tries, 4);
-
-    big_mem_chunk_allocator->DisplayAllocaInfo();
+    trie.MergeTriesByPrefix(tries, power_of_2);
 
     if (GlobalConfig.WriteDotFiles) {
         trie.DumpToDot("/tmp/trie.dot");
