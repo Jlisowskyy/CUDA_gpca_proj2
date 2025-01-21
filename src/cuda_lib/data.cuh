@@ -132,7 +132,23 @@ public:
         return rv;
     }
 
-    __device__ void Consolidate(uint32_t t_idx);
+    __device__ void Consolidate(const uint32_t t_idx) {
+        /* wait for all threads to finish using allocator */
+        __syncthreads();
+
+        /* first thread will update global data */
+        if (t_idx == 0) {
+            _prepareIdxes();
+        }
+
+        /* wait for first thread to update global data */
+        __syncthreads();
+
+        /* each of threads will clean up its allocator space */
+        _cleanUpOwnSpace(t_idx);
+
+        /* No need to wait as each thread is working on its own space */
+    }
 
     void ConsolidateHost(uint32_t t_idx, std::barrier<> &barrier, bool isLastRun);
 
@@ -156,9 +172,61 @@ public:
     // Private methods
     // ------------------------------
 protected:
-    HYBRID void _prepareIdxes();
+    HYBRID void _prepareIdxes() {
+        uint32_t last_node = _last_node;
 
-    HYBRID void _cleanUpOwnSpace(uint32_t t_idx);
+        for (uint32_t t_idx = 0; t_idx < _max_threads; ++t_idx) {
+            _idxes[t_idx] = last_node;
+
+            const uint32_t used_nodes = (_max_node_per_thread + 1) - _node_counters[t_idx];
+            last_node += used_nodes;
+        }
+
+        _last_node = last_node;
+        assert(_last_node <= _max_nodes && "DETECTED OVERFLOW");
+    }
+
+    HYBRID void _cleanUpOwnSpace(const uint32_t t_idx) {
+        assert(
+            _data[_thread_nodes[t_idx]].next[0] != 0 && _data[_thread_nodes[t_idx]].next[1] == 0 && _data[_thread_nodes[
+                t_idx]].seq_idx == UINT32_MAX);
+
+        if (_node_counters[t_idx] == _max_node_per_thread + 1) {
+            return;
+        }
+
+        /* Connect all nodes from reserved space */
+        const uint32_t used_nodes = (_max_node_per_thread + 1) - _node_counters[t_idx];
+        const uint32_t range = _idxes[t_idx] + used_nodes;
+        uint32_t node_idx = _idxes[t_idx];
+
+        for (; node_idx < range - 1; ++node_idx) {
+            Node_ &node = _data[node_idx];
+            assert(node.next[0] == 0 && node.next[1] == 0 && node.seq_idx == 0);
+
+            node.seq_idx = UINT32_MAX;
+            node.next[0] = node_idx + 1;
+            node.next[1] = 0;
+        }
+
+        Node_ &last_node = _data[node_idx];
+        assert(last_node.next[0] == 0 && last_node.next[1] == 0 && last_node.seq_idx == 0);
+        last_node.seq_idx = UINT32_MAX;
+        last_node.next[0] = 0;
+        last_node.next[1] = 0;
+
+        /* Connect tail with new list */
+        uint32_t &tail = _thread_tails[t_idx];
+
+        assert(_data[tail].next[0] == 0 && _data[tail].next[1] == 0);
+        _data[tail].next[0] = _idxes[t_idx];
+
+        /* Update the tail */
+        tail = node_idx;
+
+        /* Reset counter */
+        _node_counters[t_idx] = _max_node_per_thread + 1;
+    }
 
     // ------------------------------
     // Class fields

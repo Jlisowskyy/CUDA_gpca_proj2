@@ -47,7 +47,7 @@ static constexpr uint32_t kPrefixSize = 15;
 // Implementations
 // ------------------------------
 
-MgrTrieBuildData ThreadMgr::PrepareTrieBuildData(const BinSequencePack &pack) const {
+MgrTrieBuildData ThreadMgr::PrepareTrieBuildData(const BinSequencePack &pack, bool enforce_gpu_build) const {
     /* TODO: adjust */
     static constexpr uint32_t kMaxThreads = pow2(kPrefixSize);
 
@@ -66,7 +66,7 @@ MgrTrieBuildData ThreadMgr::PrepareTrieBuildData(const BinSequencePack &pack) co
     data.num_blocks = data.max_threads / data.num_threads_per_block;
 
     const auto t_bucket_start = std::chrono::high_resolution_clock::now();
-    _prepareBuckets(pack, data);
+    _prepareBuckets(pack, data, enforce_gpu_build);
     const auto t_bucket_end = std::chrono::high_resolution_clock::now();
 
     std::cout << "Time spent on gpu bucket preparation: "
@@ -95,7 +95,7 @@ MgrTrieSearchData ThreadMgr::PrepareSearchData() const {
     return data;
 }
 
-void ThreadMgr::_prepareBuckets(const BinSequencePack &pack, MgrTrieBuildData &data) const {
+void ThreadMgr::_prepareBuckets(const BinSequencePack &pack, MgrTrieBuildData &data, bool enforce_gpu_build) const {
     static constexpr double kMaxDeviation = 0.5;
     static constexpr uint32_t kPrefixMask = GenMask(kPrefixSize);
 
@@ -111,10 +111,6 @@ void ThreadMgr::_prepareBuckets(const BinSequencePack &pack, MgrTrieBuildData &d
     ThreadPool pool(num_threads);
     std::barrier barrier(static_cast<ptrdiff_t>(num_threads));
 
-    /* prepare prefixes */
-    std::vector<uint32_t> prefixes{};
-    prefixes.resize(data.max_threads);
-
     /* prepare mean and standard deviation */
     std::atomic<double> dev_sum{};
     std::atomic<uint32_t> mean_sum{};
@@ -125,20 +121,11 @@ void ThreadMgr::_prepareBuckets(const BinSequencePack &pack, MgrTrieBuildData &d
     std::vector<uint32_t> max_occups(num_threads, 0);
 
     /* prepare boundaries */
-    const size_t prefix_thread_range = data.max_threads / num_threads;
-    const size_t buckets_thread_range = prefix_thread_range;
+    const size_t buckets_thread_range = data.max_threads / num_threads;
     const size_t seq_thread_range = pack.sequences.size() / num_threads;
 
     /* Run in parallel */
     pool.RunThreads([&](const uint32_t thread_idx) {
-        /* fill prefix array */
-        const size_t prefix_start = thread_idx * prefix_thread_range;
-        const size_t prefix_end = thread_idx == num_threads - 1 ? data.max_threads : prefix_start + prefix_thread_range;
-
-        for (size_t idx = prefix_start; idx < prefix_end; ++idx) {
-            prefixes[idx] = kPrefixSize;
-        }
-
         /* split sequences to buckets */
         const size_t seq_start = thread_idx * seq_thread_range;
         const size_t seq_end = thread_idx == num_threads - 1 ? pack.sequences.size() : seq_start + seq_thread_range;
@@ -206,7 +193,7 @@ void ThreadMgr::_prepareBuckets(const BinSequencePack &pack, MgrTrieBuildData &d
     std::cout << "Acquired standard deviation: " << std_dev << " and mean: " << mean << '\n';
     std::cout << "Acquired deviation coef: " << dev_coef << '\n';
 
-    if (dev_coef > kMaxDeviation) {
+    if (!enforce_gpu_build && dev_coef > kMaxDeviation) {
         std::cout << "Standard deviation is too high!\n";
         std::cout << "Fallback to cpu algorithm\n";
         data.build_on_device = false;
@@ -217,38 +204,31 @@ void ThreadMgr::_prepareBuckets(const BinSequencePack &pack, MgrTrieBuildData &d
     data.build_on_device = true;
 
     /* Note: data for gpu is dumped inside the thread pool */
-    const auto t_dump_start = std::chrono::high_resolution_clock::now();
-    _dumpBucketsToGpu(buckets, prefixes, data, *std::max_element(max_occups.begin(), max_occups.end()));
-    const auto t_dump_end = std::chrono::high_resolution_clock::now();
-
-    std::cout << "Time spent on gpu data dump for buckets: "
-            << std::chrono::duration_cast<std::chrono::milliseconds>(t_dump_end - t_dump_start).count()
-            << "ms\n";
+    _dumpBucketsToGpu(buckets, data, *std::max_element(max_occups.begin(), max_occups.end()));
 }
 
-void ThreadMgr::_dumpBucketsToGpu(Buckets &buckets, const std::vector<uint32_t> &prefixes, MgrTrieBuildData &data,
-                                  const uint32_t max_occup) const {
+void ThreadMgr::_dumpBucketsToGpu(Buckets &buckets, MgrTrieBuildData &data, const uint32_t max_occup) const {
+    assert([&]{
+        for (size_t i = 0; i < data.max_threads; ++i) {
+            if (buckets.GetBucketSize(i) > max_occup) {
+                return false;
+            }
+        }
+        return true;
+    }());
+
     /* allocate memory on gpu*/
     CUDA_ASSERT_SUCCESS(
         cudaMallocAsync(&data.d_buckets, data.max_threads * max_occup * sizeof(uint32_t), g_cudaGlobalConf->asyncStream
         ));
-    CUDA_ASSERT_SUCCESS(
-        cudaMallocAsync(&data.d_bucket_prefix_len, data.max_threads * sizeof(uint32_t), g_cudaGlobalConf->asyncStream));
     CUDA_ASSERT_SUCCESS(
         cudaMallocAsync(&data.d_bucket_sizes, data.max_threads * sizeof(uint32_t), g_cudaGlobalConf->asyncStream));
 
     /* prepare pinned memory */
     uint32_t *h_buckets_pinned;
     uint32_t *h_bucket_sizes_pinned;
-    uint32_t *h_prefixes_pinned;
     CUDA_ASSERT_SUCCESS(cudaMallocHost(&h_buckets_pinned, data.max_threads * max_occup * sizeof(uint32_t)));
     CUDA_ASSERT_SUCCESS(cudaMallocHost(&h_bucket_sizes_pinned, data.max_threads * sizeof(uint32_t)));
-    CUDA_ASSERT_SUCCESS(cudaMallocHost(&h_prefixes_pinned, data.max_threads * sizeof(uint32_t)));
-
-    std::memcpy(h_prefixes_pinned, prefixes.data(), data.max_threads * sizeof(uint32_t));
-
-    CUDA_ASSERT_SUCCESS(cudaMemcpyAsync(data.d_bucket_prefix_len, h_prefixes_pinned,
-        data.max_threads * sizeof(uint32_t), cudaMemcpyHostToDevice, g_cudaGlobalConf->asyncStream));
 
     /* prepare cpu threads */
     const uint32_t num_threads = std::thread::hardware_concurrency();
@@ -276,7 +256,7 @@ void ThreadMgr::_dumpBucketsToGpu(Buckets &buckets, const std::vector<uint32_t> 
         for (size_t bucket_idx = bucket_start; bucket_idx < bucket_end; ++bucket_idx) {
             uint32_t cur{};
             while (!buckets.IsEmpty(bucket_idx)) {
-                h_buckets_pinned[bucket_idx * max_occup + cur++] = buckets.PopBucket(bucket_idx);
+                h_buckets_pinned[cur++ * data.max_threads + bucket_idx] = buckets.PopBucket(bucket_idx);
             }
         }
     });
@@ -288,11 +268,13 @@ void ThreadMgr::_dumpBucketsToGpu(Buckets &buckets, const std::vector<uint32_t> 
         cudaMemcpyAsync(data.d_buckets, h_buckets_pinned, data.max_threads * max_occup * sizeof(uint32_t),
             cudaMemcpyHostToDevice, g_cudaGlobalConf->asyncStream));
 
+    data.max_occup = max_occup;
+    data.bucket_prefix_len = kPrefixSize;
+
     /* cleanup */
     CUDA_ASSERT_SUCCESS(cudaStreamSynchronize(g_cudaGlobalConf->asyncStream));
     CUDA_ASSERT_SUCCESS(cudaStreamDestroy(g_cudaGlobalConf->asyncStream));
 
     CUDA_ASSERT_SUCCESS(cudaFreeHost(h_buckets_pinned));
     CUDA_ASSERT_SUCCESS(cudaFreeHost(h_bucket_sizes_pinned));
-    CUDA_ASSERT_SUCCESS(cudaFreeHost(h_prefixes_pinned));
 }

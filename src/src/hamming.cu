@@ -25,10 +25,63 @@ static std::vector<std::tuple<uint32_t, uint32_t> > Hamming1Distance(cuda_Trie *
 // Kernels
 // ------------------------------
 
-__global__ void BuildTrieKernel(cuda_Trie *out_trie, uint32_t *buckets, uint32_t *prefix_len, cuda_Data *data,
+__global__ void BuildTrieKernel(cuda_Trie *out_tries,
+                                const uint32_t *buckets,
+                                const uint32_t *bucket_sizes,
+                                const uint32_t prefix_len,
+                                const uint32_t max_occup,
+                                const cuda_Data *data,
                                 cuda_Allocator *allocator) {
     const uint32_t thread_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const uint32_t num_threads = gridDim.x * blockDim.x;
 
+    /* load own data */
+    cuda_Trie &my_trie = out_tries[thread_idx];
+    my_trie.Reset();
+
+    const uint32_t my_bucket_size = bucket_sizes[thread_idx];
+    assert(my_bucket_size <= max_occup);
+
+    /* build trie */
+    uint32_t bucket_offset = 0;
+    for (; bucket_offset < my_bucket_size; ++bucket_offset) {
+        const uint32_t seq_idx = buckets[bucket_offset * num_threads + thread_idx];
+        assert(seq_idx < data->GetNumSequences());
+
+        my_trie.Insert(thread_idx, *allocator, seq_idx, prefix_len, *data);
+
+        allocator->Consolidate(thread_idx);
+    }
+
+    /* consolidate with rest of the threads */
+    while (bucket_offset++ < max_occup) {
+        allocator->Consolidate(thread_idx);
+    }
+
+    /* wait for all threads to finish */
+    __syncthreads();
+
+    /* start merging by logarithmic reduction */
+    // uint32_t other_thread_idx = thread_idx;
+    // for (int32_t bit_pos = static_cast<int32_t>(prefix_len - 1); bit_pos >= 0; --bit_pos) {
+    //     const uint32_t mask = static_cast<uint32_t>(1) << bit_pos;
+    //
+    //     if ((thread_idx & mask) != 0) {
+    //         /* only threads with 0 on given position will merge */
+    //         return;
+    //     }
+    //
+    //     /* remove next bit */
+    //     other_thread_idx &= ~mask;
+    //
+    //     /* take the other trie */
+    //     cuda_Trie &other_trie = out_tries[other_thread_idx | mask];
+    //
+    //     my_trie.MergeWithOther(thread_idx, other_trie, *allocator);
+    //
+    //     /* wait for other thread to finish */
+    //     __syncthreads();
+    // }
 }
 
 __global__ void FindAllHamming1Pairs(const cuda_Trie *out_trie, const cuda_Allocator *alloca, const cuda_Data *data,
@@ -96,8 +149,8 @@ static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnDevice(
     cuda_Allocator allocator(mgr_data.max_nodes, mgr_data.max_threads, mgr_data.max_nodes_per_thread);
     cuda_Allocator *d_allocator = allocator.DumpToGPU();
 
-    cuda_Trie *d_trie;
-    CUDA_ASSERT_SUCCESS(cudaMalloc(&d_trie, sizeof(cuda_Trie)));
+    cuda_Trie *d_tries;
+    CUDA_ASSERT_SUCCESS(cudaMalloc(&d_tries, mgr_data.max_threads * sizeof(cuda_Trie)));
 
     const auto t_mem_end = std::chrono::high_resolution_clock::now();
 
@@ -105,13 +158,18 @@ static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnDevice(
             << std::chrono::duration_cast<std::chrono::milliseconds>(t_mem_end - t_mem_start).count() << "ms"
             << std::endl;
 
-    std::cout << "Building trie..." << std::endl;
     const auto t_start = std::chrono::high_resolution_clock::now();
 
     /* start trie build */
-    BuildTrieKernel<<<mgr_data.num_blocks, mgr_data.num_threads_per_block>>>(d_trie, mgr_data.d_buckets,
-                                                                             mgr_data.d_bucket_prefix_len, d_data,
-                                                                             d_allocator);
+    BuildTrieKernel<<<mgr_data.num_blocks, mgr_data.num_threads_per_block>>>(
+        d_tries,
+        mgr_data.d_buckets,
+        mgr_data.d_bucket_sizes,
+        mgr_data.bucket_prefix_len,
+        mgr_data.max_occup,
+        d_data,
+        d_allocator
+    );
 
     /* cleanup host data */
     data.DeallocHost();
@@ -128,9 +186,9 @@ static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnDevice(
 
     /* cleanup management data */
     CUDA_ASSERT_SUCCESS(cudaFree(mgr_data.d_buckets));
-    CUDA_ASSERT_SUCCESS(cudaFree(mgr_data.d_bucket_prefix_len));
+    CUDA_ASSERT_SUCCESS(cudaFree(mgr_data.d_bucket_sizes));
 
-    return {d_trie, d_data, d_allocator};
+    return {d_tries, d_data, d_allocator};
 }
 
 static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnHost(const BinSequencePack &pack) {
@@ -168,8 +226,9 @@ static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnHost(const
     /* Run threads */
     pool.RunThreads([&](const uint32_t thread_idx) {
         const size_t job_start = thread_idx * thread_job_size;
-        const size_t job_end = thread_idx == num_threads - 1 ? pack.sequences.size()
-            : (thread_idx + 1) * thread_job_size;
+        const size_t job_end = thread_idx == num_threads - 1
+                                   ? pack.sequences.size()
+                                   : (thread_idx + 1) * thread_job_size;
 
         /* Bucket sorting */
         for (size_t seq_idx = job_start; seq_idx < job_end; ++seq_idx) {
@@ -369,7 +428,7 @@ void TestCUDATrieCpuBuild(const BinSequencePack &pack) {
 
 void TestCUDATrieGPUBuild(const BinSequencePack &pack) {
     const ThreadMgr mgr{};
-    const auto mgr_data = mgr.PrepareTrieBuildData(pack);
+    const auto mgr_data = mgr.PrepareTrieBuildData(pack, true);
 
     const auto [d_trie, d_data, d_alloca] = _buildOnDevice(mgr_data, pack);
     _testTrie(pack.sequences.size(), d_trie, d_data, d_alloca);

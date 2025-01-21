@@ -24,8 +24,9 @@ struct MgrTrieBuildData {
 
     /* bucket building management */
     uint32_t *d_buckets{};
-    uint32_t *d_bucket_prefix_len{};
     uint32_t *d_bucket_sizes{};
+    uint32_t bucket_prefix_len{};
+    uint32_t max_occup{};
     bool build_on_device{};
 };
 
@@ -55,7 +56,7 @@ public:
     // Interactions
     // ------------------------------
 
-    [[nodiscard]] MgrTrieBuildData PrepareTrieBuildData(const BinSequencePack &pack) const;
+    [[nodiscard]] MgrTrieBuildData PrepareTrieBuildData(const BinSequencePack &pack, bool enforce_gpu_build = false) const;
 
     [[nodiscard]] MgrTrieSearchData PrepareSearchData() const;
 
@@ -64,10 +65,9 @@ public:
     // ------------------------------
 protected:
 
-    void _prepareBuckets(const BinSequencePack& pack, MgrTrieBuildData& data) const;
+    void _prepareBuckets(const BinSequencePack& pack, MgrTrieBuildData& data, bool enforce_gpu_build) const;
 
-    void _dumpBucketsToGpu(Buckets& buckets, const std::vector<uint32_t>& prefixes,
-                           MgrTrieBuildData& data, uint32_t max_occup) const;
+    void _dumpBucketsToGpu(Buckets& buckets, MgrTrieBuildData& data, uint32_t max_occup) const;
 
     // ------------------------------
     // Class fields

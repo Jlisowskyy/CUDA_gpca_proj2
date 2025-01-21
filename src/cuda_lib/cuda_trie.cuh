@@ -8,6 +8,22 @@
 /* external includes */
 #include <cstdint>
 
+// ------------------------------
+// static functions
+// ------------------------------
+
+[[nodiscard]] FAST_CALL_ALWAYS static uint32_t AllocateNode(cuda_Allocator &allocator, const uint32_t t_idx) {
+    return allocator.AllocateNode(t_idx);
+}
+
+[[nodiscard]] FAST_CALL_ALWAYS static uint32_t AllocateNode(cuda_Allocator &allocator, const uint32_t t_idx,
+                                                            const uint32_t seq_idx) {
+    const uint32_t node_idx = allocator.AllocateNode(t_idx);
+
+    allocator[node_idx].seq_idx = seq_idx;
+    return node_idx;
+}
+
 class cuda_Trie {
     // ------------------------------
     // Class creation
@@ -21,8 +37,102 @@ public:
     // class interaction
     // ------------------------------
 
-    HYBRID bool Insert(uint32_t t_idx, cuda_Allocator &allocator, uint32_t seq_idx, uint32_t start_bit_idx,
-                       const cuda_Data &data);
+    HYBRID void Reset() {
+        _root_idx = 0;
+    }
+
+    HYBRID bool Insert(const uint32_t t_idx,
+                       cuda_Allocator &allocator,
+                       const uint32_t seq_idx,
+                       const uint32_t start_bit_idx,
+                       const cuda_Data &data) {
+        const auto sequence = data[seq_idx];
+        uint32_t *node_idx = &_root_idx;
+
+        if (start_bit_idx >= sequence.GetSequenceLength()) {
+            return false;
+        }
+
+        uint32_t bit_idx = start_bit_idx;
+        /* traverse existing tree or until we reach the end of the sequence */
+        while (*node_idx && (allocator[*node_idx].next[0] || allocator[*node_idx].next[1])
+               && bit_idx < sequence.GetSequenceLength()) {
+            node_idx = &allocator[*node_idx].next[sequence.GetBit(bit_idx++)];
+        }
+
+        if (!*node_idx) {
+            /* we reached the end of the tree */
+            *node_idx = AllocateNode(allocator, t_idx);
+            allocator[*node_idx].seq_idx = seq_idx;
+            return true;
+        }
+
+        if (bit_idx == sequence.GetSequenceLength()) {
+            /* we reached the end of the sequence */
+            /* we are also sure that the p is not null */
+
+            assert(allocator[*node_idx].seq_idx == UINT32_MAX && "DETECTED OVERWRITE");
+            /* assign the sequence index to the node */
+            allocator[*node_idx].seq_idx = seq_idx;
+
+            return true;
+        }
+
+        if (sequence.Compare(data[allocator[*node_idx].seq_idx], bit_idx)) {
+            /* we found node with assigned sequence */
+            return false;
+        }
+
+        /* we found node with assigned sequence */
+        const uint32_t old_node_idx = *node_idx;
+        const auto old_seq = data[allocator[old_node_idx].seq_idx];
+        *node_idx = allocator.AllocateNode(t_idx);
+        assert(allocator[old_node_idx].next[0] == 0 && allocator[old_node_idx].next[1] == 0);
+
+        while (bit_idx < sequence.GetSequenceLength() &&
+               bit_idx < old_seq.GetSequenceLength() &&
+               sequence.GetBit(bit_idx) == old_seq.GetBit(bit_idx)) {
+            /* add nodes until we reach the difference or there is no more bits to compare */
+            const bool bit = sequence.GetBit(bit_idx++);
+
+            allocator[*node_idx].next[bit] = AllocateNode(allocator, t_idx);
+            node_idx = &allocator[*node_idx].next[bit];
+        }
+
+        if (bit_idx == sequence.GetSequenceLength() && bit_idx == old_seq.GetSequenceLength()) {
+            /* we reached the end of both sequences and no difference was found assign on of them and exit */
+            allocator[*node_idx].seq_idx = seq_idx;
+
+            return true;
+        }
+
+        if (bit_idx == old_seq.GetSequenceLength()) {
+            /* we reached the end of the old sequence */
+            assert(allocator[*node_idx].seq_idx == UINT32_MAX);
+
+            allocator[*node_idx].seq_idx = allocator[old_node_idx].seq_idx;
+            allocator[old_node_idx].seq_idx = seq_idx;
+            allocator[*node_idx].next[sequence.GetBit(bit_idx)] = old_node_idx;
+
+            return true;
+        }
+
+        if (bit_idx == sequence.GetSequenceLength()) {
+            /* we reached the end of the new sequence */
+            assert(allocator[*node_idx].seq_idx == UINT32_MAX);
+
+            allocator[*node_idx].seq_idx = seq_idx;
+            allocator[*node_idx].next[old_seq.GetBit(bit_idx)] = old_node_idx;
+
+            return true;
+        }
+
+        /* we reached the difference */
+        allocator[*node_idx].next[old_seq.GetBit(bit_idx)] = old_node_idx;
+        allocator[*node_idx].next[sequence.GetBit(bit_idx)] = AllocateNode(allocator, t_idx, seq_idx);
+
+        return true;
+    }
 
     HYBRID bool Search(const cuda_Allocator &allocator, uint32_t seq_idx, const cuda_Data &data) const {
         const auto sequence = data[seq_idx];
@@ -36,7 +146,8 @@ public:
         }
 
         return node_idx && (allocator[node_idx].seq_idx == seq_idx ||
-                            sequence.Compare(data[allocator[node_idx].seq_idx]));    }
+                            sequence.Compare(data[allocator[node_idx].seq_idx]));
+    }
 
     __device__ void FindPairs(const uint32_t seq_idx, const cuda_Allocator &allocator, const cuda_Data &data,
                               cuda_Solution &solutions) const {
@@ -81,6 +192,18 @@ public:
     }
 
     [[nodiscard]] cuda_Trie *DumpToGpu() const;
+
+    /* assume the other always goes to bit 1 */
+    __device__ void MergeWithOther(const uint32_t thread_idx, cuda_Trie &other, cuda_Allocator &allocator) {
+        const uint32_t root0 = _root_idx;
+        const uint32_t root1 = other._root_idx;
+
+        _root_idx = allocator.AllocateNode(thread_idx);
+        allocator[_root_idx].next[0] = root0;
+        allocator[_root_idx].next[1] = root1;
+
+        other._root_idx = 0;
+    }
 
     void MergeByPrefixHost(cuda_Allocator &allocator, const cuda_Data &data, std::vector<cuda_Trie> &tries,
                            uint32_t prefix_len);

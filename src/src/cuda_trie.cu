@@ -8,115 +8,8 @@
 #include <fstream>
 
 // ------------------------------
-// static functions
-// ------------------------------
-
-[[nodiscard]] FAST_CALL_ALWAYS static uint32_t AllocateNode(cuda_Allocator& allocator, const uint32_t t_idx) {
-    return allocator.AllocateNode(t_idx);
-}
-
-[[nodiscard]] FAST_CALL_ALWAYS static uint32_t AllocateNode(cuda_Allocator& allocator, const uint32_t t_idx, const uint32_t seq_idx) {
-    const uint32_t node_idx = allocator.AllocateNode(t_idx);
-
-    allocator[node_idx].seq_idx = seq_idx;
-    return node_idx;
-}
-
-// ------------------------------
 // implementations
 // ------------------------------
-
-
-bool cuda_Trie::Insert(const uint32_t t_idx, cuda_Allocator &allocator, const uint32_t seq_idx,
-                       const uint32_t start_bit_idx,
-                       const cuda_Data &data) {
-    const auto sequence = data[seq_idx];
-    uint32_t *node_idx = &_root_idx;
-
-    if (start_bit_idx >= sequence.GetSequenceLength()) {
-        return false;
-    }
-
-    uint32_t bit_idx = start_bit_idx;
-    /* traverse existing tree or until we reach the end of the sequence */
-    while (*node_idx && (allocator[*node_idx].next[0] || allocator[*node_idx].next[1])
-           && bit_idx < sequence.GetSequenceLength()) {
-        node_idx = &allocator[*node_idx].next[sequence.GetBit(bit_idx++)];
-    }
-
-    if (!*node_idx) {
-        /* we reached the end of the tree */
-        *node_idx = AllocateNode(allocator, t_idx);
-        allocator[*node_idx].seq_idx = seq_idx;
-        return true;
-    }
-
-    if (bit_idx == sequence.GetSequenceLength()) {
-        /* we reached the end of the sequence */
-        /* we are also sure that the p is not null */
-
-        assert(allocator[*node_idx].seq_idx == UINT32_MAX && "DETECTED OVERWRITE");
-        /* assign the sequence index to the node */
-        allocator[*node_idx].seq_idx = seq_idx;
-
-        return true;
-    }
-
-    if (sequence.Compare(data[allocator[*node_idx].seq_idx], bit_idx)) {
-        /* we found node with assigned sequence */
-        return false;
-    }
-
-    /* we found node with assigned sequence */
-    const uint32_t old_node_idx = *node_idx;
-    const auto old_seq = data[allocator[old_node_idx].seq_idx];
-    *node_idx = allocator.AllocateNode(t_idx);
-    assert(allocator[old_node_idx].next[0] == 0 && allocator[old_node_idx].next[1] == 0);
-
-    while (bit_idx < sequence.GetSequenceLength() &&
-           bit_idx < old_seq.GetSequenceLength() &&
-           sequence.GetBit(bit_idx) == old_seq.GetBit(bit_idx)) {
-        /* add nodes until we reach the difference or there is no more bits to compare */
-        const bool bit = sequence.GetBit(bit_idx++);
-
-        allocator[*node_idx].next[bit] = AllocateNode(allocator, t_idx);
-        node_idx = &allocator[*node_idx].next[bit];
-    }
-
-    if (bit_idx == sequence.GetSequenceLength() && bit_idx == old_seq.GetSequenceLength()) {
-        /* we reached the end of both sequences and no difference was found assign on of them and exit */
-        allocator[*node_idx].seq_idx = seq_idx;
-
-        return true;
-    }
-
-    if (bit_idx == old_seq.GetSequenceLength()) {
-        /* we reached the end of the old sequence */
-        assert(allocator[*node_idx].seq_idx == UINT32_MAX);
-
-        allocator[*node_idx].seq_idx = allocator[old_node_idx].seq_idx;
-        allocator[old_node_idx].seq_idx = seq_idx;
-        allocator[*node_idx].next[sequence.GetBit(bit_idx)] = old_node_idx;
-
-        return true;
-    }
-
-    if (bit_idx == sequence.GetSequenceLength()) {
-        /* we reached the end of the new sequence */
-        assert(allocator[*node_idx].seq_idx == UINT32_MAX);
-
-        allocator[*node_idx].seq_idx = seq_idx;
-        allocator[*node_idx].next[old_seq.GetBit(bit_idx)] = old_node_idx;
-
-        return true;
-    }
-
-    /* we reached the difference */
-    allocator[*node_idx].next[old_seq.GetBit(bit_idx)] = old_node_idx;
-    allocator[*node_idx].next[sequence.GetBit(bit_idx)] = AllocateNode(allocator, t_idx, seq_idx);
-
-    return true;
-}
 
 cuda_Trie *cuda_Trie::DumpToGpu() const {
     cuda_Trie *d_trie;
@@ -208,3 +101,4 @@ bool cuda_Trie::DumpToDotFile(const cuda_Allocator &allocator, const cuda_Data &
     file << DumpToDot(allocator, data, graph_name);
     return true;
 }
+
