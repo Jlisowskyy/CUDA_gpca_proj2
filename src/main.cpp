@@ -1,11 +1,15 @@
 /* internal includes */
 #include <arg_parser.hpp>
 #include <dispatcher.hpp>
+#include <thread_pool.hpp>
 
 /* external includes */
 #include <iostream>
 
 static void main_(const int argc, char **argv) {
+    /* initialize infra */
+    ThreadPool::InitGlobalWorkers();
+
     ArgParser arg_parser(argc - 1, argv + 1);
     const auto arg_pack = arg_parser.ParseArgs();
 
