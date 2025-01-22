@@ -162,7 +162,7 @@ public:
         CUDA_ASSERT_SUCCESS(cudaMallocAsync(&d_pages, kMaxPages * sizeof(Node_ *), g_cudaGlobalConf->asyncStream));
 
         /* wait for all allocations */
-        CUDA_ASSERT_SUCCESS(cudaStreamSynchronize(g_cudaGlobalConf->asyncStream));
+        // CUDA_ASSERT_SUCCESS(cudaStreamSynchronize(g_cudaGlobalConf->asyncStream));
 
         /* copy allocator object */
         CUDA_ASSERT_SUCCESS(
@@ -213,9 +213,15 @@ public:
         /* prepare host page table */
         auto h_pages = new Node_ *[kMaxPages]{};
 
+        /* copy pointer to pages */
+        Node_** d_pages;
+        CUDA_ASSERT_SUCCESS(
+            cudaMemcpyAsync(&d_pages, &allocator->_pages, sizeof(Node_ **), cudaMemcpyDeviceToHost,
+                g_cudaGlobalConf->asyncStream));
+
         /* copy page table */
         CUDA_ASSERT_SUCCESS(
-            cudaMemcpyAsync(h_pages, allocator->_pages, kMaxPages * sizeof(Node_ *), cudaMemcpyDeviceToHost,
+            cudaMemcpyAsync(h_pages, d_pages, kMaxPages * sizeof(Node_ *), cudaMemcpyDeviceToHost,
                 g_cudaGlobalConf->asyncStream));
 
         /* delete individual pages */
@@ -226,13 +232,21 @@ public:
         }
 
         /* free page table */
-        CUDA_ASSERT_SUCCESS(cudaFreeAsync(allocator->_pages, g_cudaGlobalConf->asyncStream));
+        CUDA_ASSERT_SUCCESS(cudaFreeAsync(d_pages, g_cudaGlobalConf->asyncStream));
 
         /* free thread tops */
-        CUDA_ASSERT_SUCCESS(cudaFreeAsync(allocator->_thread_tops, g_cudaGlobalConf->asyncStream));
+        uint32_t *d_thread_tops;
+        CUDA_ASSERT_SUCCESS(
+            cudaMemcpyAsync(&d_thread_tops, &allocator->_thread_tops, sizeof(uint32_t *), cudaMemcpyDeviceToHost,
+                g_cudaGlobalConf->asyncStream));
+        CUDA_ASSERT_SUCCESS(cudaFreeAsync(d_thread_tops, g_cudaGlobalConf->asyncStream));
 
         /* free thread bottoms */
-        CUDA_ASSERT_SUCCESS(cudaFreeAsync(allocator->_thread_bottoms, g_cudaGlobalConf->asyncStream));
+        uint32_t *d_thread_bottoms;
+        CUDA_ASSERT_SUCCESS(
+            cudaMemcpyAsync(&d_thread_bottoms, &allocator->_thread_bottoms, sizeof(uint32_t *), cudaMemcpyDeviceToHost,
+                g_cudaGlobalConf->asyncStream));
+        CUDA_ASSERT_SUCCESS(cudaFreeAsync(d_thread_bottoms, g_cudaGlobalConf->asyncStream));
 
         /* free allocator object */
         CUDA_ASSERT_SUCCESS(cudaFreeAsync(allocator, g_cudaGlobalConf->asyncStream));
