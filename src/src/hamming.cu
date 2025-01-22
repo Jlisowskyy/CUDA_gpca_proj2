@@ -91,7 +91,10 @@ __global__ void FindAllHamming1Pairs(const cuda_Trie *out_trie, const FastAlloca
 
 __global__ void TestTrieBuild(const cuda_Trie *trie, const cuda_Data *data, const FastAllocator *alloca,
                               bool *result) {
-    for (size_t idx = 0; idx < data->GetNumSequences(); ++idx) {
+    const uint32_t thread_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const uint32_t num_threads = gridDim.x * blockDim.x;
+
+    for (uint32_t idx = thread_idx; idx < data->GetNumSequences(); idx += num_threads) {
         result[idx] = trie->Search(*alloca, idx, *data);
     }
 }
@@ -103,7 +106,7 @@ __global__ void TestTrieBuild(const cuda_Trie *trie, const cuda_Data *data, cons
 static void _testTrie(const size_t num_seq, cuda_Trie *d_trie, cuda_Data *d_data, FastAllocator *d_alloca) {
     bool *d_result;
     CUDA_ASSERT_SUCCESS(cudaMalloc(&d_result, sizeof(bool) * num_seq));
-    TestTrieBuild<<<1, 1>>>(d_trie, d_data, d_alloca, d_result);
+    TestTrieBuild<<<64, 1024>>>(d_trie, d_data, d_alloca, d_result);
     CUDA_ASSERT_SUCCESS(cudaDeviceSynchronize());
 
     auto h_result = new bool[num_seq];

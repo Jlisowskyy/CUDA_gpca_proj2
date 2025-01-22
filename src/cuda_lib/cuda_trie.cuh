@@ -17,16 +17,14 @@
 // ------------------------------
 
 template<bool isGpu>
-[[nodiscard]] FAST_CALL_ALWAYS static uint32_t AllocateNode(FastAllocator &allocator, const uint32_t t_idx) {
-    return allocator.AllocateNode<isGpu>(t_idx);
-}
-
-template<bool isGpu>
 [[nodiscard]] FAST_CALL_ALWAYS static uint32_t AllocateNode(FastAllocator &allocator, const uint32_t t_idx,
-                                                            const uint32_t seq_idx) {
+                                                            const uint32_t seq_idx = UINT32_MAX) {
     const uint32_t node_idx = allocator.AllocateNode<isGpu>(t_idx);
 
     allocator[node_idx].seq_idx = seq_idx;
+    allocator[node_idx].next[0] = 0;
+    allocator[node_idx].next[1] = 0;
+
     return node_idx;
 }
 
@@ -69,8 +67,7 @@ public:
 
         if (!*node_idx) {
             /* we reached the end of the tree */
-            *node_idx = AllocateNode<isGpu>(allocator, t_idx);
-            allocator[*node_idx].seq_idx = seq_idx;
+            *node_idx = AllocateNode<isGpu>(allocator, t_idx, seq_idx);
             return true;
         }
 
@@ -93,7 +90,7 @@ public:
         /* we found node with assigned sequence */
         const uint32_t old_node_idx = *node_idx;
         const auto old_seq = data[allocator[old_node_idx].seq_idx];
-        *node_idx = allocator.AllocateNode(t_idx);
+        *node_idx = AllocateNode<isGpu>(allocator, t_idx);
         assert(allocator[old_node_idx].next[0] == 0 && allocator[old_node_idx].next[1] == 0);
 
         while (bit_idx < sequence.GetSequenceLength() &&
