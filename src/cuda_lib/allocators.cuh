@@ -83,10 +83,12 @@ public:
     // ------------------------------
 
     [[nodiscard]] FAST_CALL_ALWAYS Node_ &operator[](const uint32_t idx) {
+        assert(idx < kPageSizeInTypeSize * _last_page + _last_page_offset);
         return _pages[idx / kPageSizeInTypeSize][idx % kPageSizeInTypeSize];
     }
 
     [[nodiscard]] FAST_CALL_ALWAYS const Node_ &operator[](const uint32_t idx) const {
+        assert(idx < kPageSizeInTypeSize * _last_page + _last_page_offset);
         return _pages[idx / kPageSizeInTypeSize][idx % kPageSizeInTypeSize];
     }
 
@@ -95,12 +97,12 @@ public:
         /* get current thread top */
         uint32_t top = _thread_tops[t_idx]++;
 
-        /* check if we need new block - lazy allocation */
+        /* check if we need new chunk - lazy allocation */
         if (top > _thread_chunk_size_in_type) {
-            /* get new block */
+            /* get new chunk */
             if constexpr (isGpu) {
             } else {
-                _thread_bottoms[t_idx] = _AllocateNewBlockCpu();
+                _thread_bottoms[t_idx] = _AllocateNewChunkCpu();
             }
 
             _thread_tops[t_idx] = 0;
@@ -132,39 +134,52 @@ public:
         /* allocate the object itself */
         FastAllocator *d_allocator;
         CUDA_ASSERT_SUCCESS(cudaMallocAsync(&d_allocator, sizeof(FastAllocator), g_cudaGlobalConf->asyncStream));
-        CUDA_ASSERT_SUCCESS(cudaMemcpyAsync(d_allocator, this, sizeof(FastAllocator), cudaMemcpyHostToDevice,
-            g_cudaGlobalConf->asyncStream));
 
-        /* copy thread tops */
+        /* allocate thread tops */
         uint32_t *d_thread_tops;
         CUDA_ASSERT_SUCCESS(
             cudaMallocAsync(&d_thread_tops, _num_threads * sizeof(uint32_t), g_cudaGlobalConf->asyncStream));
-        CUDA_ASSERT_SUCCESS(
-            cudaMemcpyAsync(d_thread_tops, _thread_tops, _num_threads * sizeof(uint32_t), cudaMemcpyHostToDevice,
-                g_cudaGlobalConf->asyncStream));
 
-        /* copy thread bottoms */
+        /* allocate thread bottoms */
         uint32_t *d_thread_bottoms;
         CUDA_ASSERT_SUCCESS(
             cudaMallocAsync(&d_thread_bottoms, _num_threads * sizeof(uint32_t), g_cudaGlobalConf->asyncStream));
-        CUDA_ASSERT_SUCCESS(
-            cudaMemcpyAsync(d_thread_bottoms, _thread_bottoms, _num_threads * sizeof(uint32_t), cudaMemcpyHostToDevice,
-                g_cudaGlobalConf->asyncStream));
 
         /* allocate pages */
         auto h_pages = new Node_ *[kMaxPages]{};
         for (uint32_t page_idx = 0; page_idx < _last_page; ++page_idx) {
             Node_ *d_page;
             CUDA_ASSERT_SUCCESS(cudaMallocAsync(&d_page, kPageSize, g_cudaGlobalConf->asyncStream));
-            CUDA_ASSERT_SUCCESS(cudaMemcpyAsync(d_page, _pages[page_idx], kPageSize, cudaMemcpyHostToDevice,
-                g_cudaGlobalConf->asyncStream));
-
             h_pages[page_idx] = d_page;
         }
 
-        /* copy page table */
+        /* allocate page table */
         Node_ **d_pages;
         CUDA_ASSERT_SUCCESS(cudaMallocAsync(&d_pages, kMaxPages * sizeof(Node_ *), g_cudaGlobalConf->asyncStream));
+
+        /* wait for all allocations */
+
+        /* copy thread tops */
+        CUDA_ASSERT_SUCCESS(
+            cudaMemcpyAsync(d_thread_tops, _thread_tops, _num_threads * sizeof(uint32_t), cudaMemcpyHostToDevice,
+                g_cudaGlobalConf->asyncStream));
+
+        /* copy thread bottoms */
+        CUDA_ASSERT_SUCCESS(
+            cudaMemcpyAsync(d_thread_bottoms, _thread_bottoms, _num_threads * sizeof(uint32_t), cudaMemcpyHostToDevice,
+                g_cudaGlobalConf->asyncStream));
+
+        /* copy pages */
+        for (uint32_t page_idx = 0; page_idx < _last_page; ++page_idx) {
+            if (h_pages[page_idx] == nullptr) {
+                continue;
+            }
+
+            CUDA_ASSERT_SUCCESS(cudaMemcpyAsync(h_pages[page_idx], _pages[page_idx], kPageSize, cudaMemcpyHostToDevice,
+                g_cudaGlobalConf->asyncStream));
+        }
+
+        /* copy page table */
         CUDA_ASSERT_SUCCESS(cudaMemcpyAsync(d_pages, h_pages, kMaxPages * sizeof(Node_ *), cudaMemcpyHostToDevice,
             g_cudaGlobalConf->asyncStream));
 
@@ -179,11 +194,11 @@ public:
             cudaMemcpyAsync(&d_allocator->_pages, &d_pages, sizeof(Node_ **), cudaMemcpyHostToDevice, g_cudaGlobalConf->
                 asyncStream));
 
-        /* free temporary data */
-        delete[] h_pages;
-
         /* final sync */
         CUDA_ASSERT_SUCCESS(cudaStreamSynchronize(g_cudaGlobalConf->asyncStream));
+
+        /* free temporary data */
+        delete[] h_pages;
 
         return d_allocator;
     }
@@ -216,11 +231,11 @@ public:
         /* free allocator object */
         CUDA_ASSERT_SUCCESS(cudaFreeAsync(allocator, g_cudaGlobalConf->asyncStream));
 
-        /* cleanup */
-        delete[] h_pages;
-
         /* final sync */
         CUDA_ASSERT_SUCCESS(cudaStreamSynchronize(g_cudaGlobalConf->asyncStream));
+
+        /* cleanup */
+        delete[] h_pages;
     }
 
     // ------------------------------
@@ -231,7 +246,7 @@ protected:
     // Allocator calls
     // ------------------------------
 
-    [[nodiscard]] uint32_t _AllocateNewBlockCpu() {
+    [[nodiscard]] uint32_t _AllocateNewChunkCpu() {
         CpuSpinLock lock(_spin_lock);
         lock.lock();
 
