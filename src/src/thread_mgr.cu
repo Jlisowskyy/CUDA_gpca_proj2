@@ -273,7 +273,6 @@ void ThreadMgr::_dumpBucketsToGpu(Buckets &buckets, MgrTrieBuildData &data, cons
 
     /* cleanup */
     CUDA_ASSERT_SUCCESS(cudaStreamSynchronize(g_cudaGlobalConf->asyncStream));
-    CUDA_ASSERT_SUCCESS(cudaStreamDestroy(g_cudaGlobalConf->asyncStream));
 
     CUDA_ASSERT_SUCCESS(cudaFreeHost(h_buckets_pinned));
     CUDA_ASSERT_SUCCESS(cudaFreeHost(h_bucket_sizes_pinned));

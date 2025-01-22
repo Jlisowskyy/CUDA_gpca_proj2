@@ -7,6 +7,8 @@
 #include <iostream>
 #include <memory>
 
+__device__ volatile int sem;
+
 std::tuple<cuda_Solution *, uint32_t *> cuda_Solution::DumpToGPU(const size_t num_solutions) {
     uint32_t *d_data{};
     CUDA_ASSERT_SUCCESS(cudaMalloc(&d_data, GetMemBlockSize(num_solutions)));

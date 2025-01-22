@@ -16,10 +16,11 @@ static constexpr uint32_t kSpinLockLocked = 1;
 
 class CpuSpinLock {
 public:
-    explicit CpuSpinLock(uint32_t &lock_base) : _lock_base(reinterpret_cast<std::atomic<uint32_t> *>(&lock_base)) {
+    explicit CpuSpinLock(volatile uint32_t &lock_base) : _lock_base(
+        reinterpret_cast<std::atomic<uint32_t> *>(const_cast<uint32_t *>(&lock_base))) {
     }
 
-    void lock() {
+    FORCE_INLINE void lock() {
         uint32_t expected = kSpinLockFree;
 
         while (!_lock_base->compare_exchange_strong(expected, kSpinLockLocked, std::memory_order_acquire)) {
@@ -27,12 +28,39 @@ public:
         }
     }
 
-    void unlock() {
+    FORCE_INLINE void unlock() {
         _lock_base->store(kSpinLockFree, std::memory_order_release);
     }
 
 protected:
     std::atomic<uint32_t> *_lock_base;
+};
+
+class GpuSpinLock {
+public:
+    FAST_DCALL_ALWAYS explicit GpuSpinLock(volatile uint32_t &lock_base): _lock_base(&lock_base) {
+    }
+
+    FAST_DCALL_ALWAYS void lock() {
+        while (atomicCAS(const_cast<uint32_t *>(_lock_base), kSpinLockFree, kSpinLockLocked) != kSpinLockFree) {
+            __threadfence();
+            // __nanosleep(100);
+        }
+
+        printf("locked\n");
+        __threadfence();
+    }
+
+    FAST_DCALL_ALWAYS void unlock() {
+        __threadfence();
+        const auto result = atomicExch(const_cast<uint32_t *>(_lock_base), kSpinLockFree);
+        assert(result == kSpinLockLocked);
+        __threadfence();
+        printf("unlocked...\n");
+    }
+
+protected:
+    volatile uint32_t *_lock_base;
 };
 
 class FastAllocator {
@@ -110,6 +138,7 @@ public:
         if (top == _thread_chunk_size_in_type) {
             /* get new chunk */
             if constexpr (isGpu) {
+                _thread_bottoms[t_idx] = _AllocateNewChunkGpu();
             } else {
                 _thread_bottoms[t_idx] = _AllocateNewChunkCpu();
             }
@@ -127,7 +156,7 @@ public:
     // Management methods
     // ------------------------------
 
-    [[nodiscard]] size_t GetNumNodesAllocated() const {
+    [[nodiscard]] FAST_CALL_ALWAYS size_t GetNumNodesAllocated() const {
         return _last_page * kPageSizeInTypeSize + _last_page_offset;
     }
 
@@ -171,9 +200,6 @@ public:
         /* allocate page table */
         Node_ **d_pages;
         CUDA_ASSERT_SUCCESS(cudaMallocAsync(&d_pages, kMaxPages * sizeof(Node_ *), g_cudaGlobalConf->asyncStream));
-
-        /* wait for all allocations */
-        // CUDA_ASSERT_SUCCESS(cudaStreamSynchronize(g_cudaGlobalConf->asyncStream));
 
         /* copy allocator object */
         CUDA_ASSERT_SUCCESS(
@@ -307,6 +333,36 @@ protected:
         return idx;
     }
 
+    [[nodiscard]] __device__ uint32_t _AllocateNewChunkGpu() {
+        GpuSpinLock lock(_spin_lock);
+        lock.lock();
+
+        uint32_t page_offset = _last_page_offset;
+        _last_page_offset += _thread_chunk_size_in_type;
+        if (page_offset == kPageSizeInTypeSize) {
+            /* we exhausted current page -> we need new one */
+            /* performed in lazy manner */
+
+            ++_last_page;
+            assert(_last_page < kMaxPages);
+
+            _pages[_last_page] = new Node_[kPageSizeInTypeSize];
+
+            /* already offset for new chunk */
+            page_offset = 0;
+            _last_page_offset = _thread_chunk_size_in_type;
+        }
+
+        assert(
+            static_cast<uint64_t>(_last_page) * kPageSizeInTypeSize + static_cast<uint64_t>(page_offset) <= static_cast<
+            uint64_t>(UINT32_MAX));
+        const uint32_t idx = _last_page * kPageSizeInTypeSize + page_offset;
+        lock.unlock();
+
+        assert(_last_page_offset <= kPageSizeInTypeSize);
+        return idx;
+    }
+
     // ------------------------------
     // Class fields
     // ------------------------------
@@ -323,7 +379,7 @@ protected:
     Node_ **_pages{};
     uint32_t _last_page{};
     uint32_t _last_page_offset{};
-    uint32_t _spin_lock{};
+    volatile uint32_t _spin_lock{};
 };
 
 #endif //ALLOCATORS_CUH
