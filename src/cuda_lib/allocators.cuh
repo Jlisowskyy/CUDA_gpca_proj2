@@ -20,7 +20,7 @@ static constexpr uint32_t kMaxPages = 64;
 static constexpr uint64_t kPageSizeInTypeSize = kPageSize / sizeof(Node_);
 
 static constexpr uint32_t kPageRemainder = kPageSizeInTypeSize - 1;
-static constexpr uint32_t kPageDivider = std::bit_floor(kPageSizeInTypeSize);
+static constexpr uint32_t kPageDivider = std::countr_zero(kPageSizeInTypeSize);
 
 class CpuSpinLock {
 public:
