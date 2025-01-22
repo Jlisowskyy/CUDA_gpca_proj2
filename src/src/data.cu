@@ -11,12 +11,15 @@ __device__ volatile int sem;
 
 std::tuple<cuda_Solution *, uint32_t *> cuda_Solution::DumpToGPU(const size_t num_solutions) {
     uint32_t *d_data{};
-    CUDA_ASSERT_SUCCESS(cudaMalloc(&d_data, GetMemBlockSize(num_solutions)));
-    CUDA_ASSERT_SUCCESS(cudaMemset(d_data, UINT32_MAX, GetMemBlockSize(num_solutions)));
+    CUDA_ASSERT_SUCCESS(cudaMallocAsync(&d_data, GetMemBlockSize(num_solutions), g_cudaGlobalConf->asyncStream));
+    CUDA_ASSERT_SUCCESS(
+        cudaMemsetAsync(d_data, UINT32_MAX, GetMemBlockSize(num_solutions), g_cudaGlobalConf->asyncStream));
 
     cuda_Solution *d_solutions{};
-    CUDA_ASSERT_SUCCESS(cudaMalloc(&d_solutions, sizeof(cuda_Solution)));
-    CUDA_ASSERT_SUCCESS(cudaMemcpy(&d_solutions->_data, &d_data, sizeof(uint32_t *), cudaMemcpyHostToDevice));
+    CUDA_ASSERT_SUCCESS(cudaMallocAsync(&d_solutions, sizeof(cuda_Solution), g_cudaGlobalConf->asyncStream));
+    CUDA_ASSERT_SUCCESS(
+        cudaMemcpyAsync(&d_solutions->_data, &d_data, sizeof(uint32_t *), cudaMemcpyHostToDevice, g_cudaGlobalConf->
+            asyncStream));
 
     return {d_solutions, d_data};
 }
@@ -75,12 +78,14 @@ cuda_Data *cuda_Data::DumpToGPU() const {
 
 uint32_t *cuda_Data::GetDataPtrHost(const cuda_Data *d_data) {
     uint32_t *ptr;
-    CUDA_ASSERT_SUCCESS(cudaMemcpy(&ptr, &d_data->_data, sizeof(uint32_t *), cudaMemcpyDeviceToHost));
+    CUDA_ASSERT_SUCCESS(
+        cudaMemcpyAsync(&ptr, &d_data->_data, sizeof(uint32_t *), cudaMemcpyDeviceToHost, g_cudaGlobalConf->asyncStream
+        ));
     return ptr;
 }
 
 void cuda_Data::DeallocGPU(cuda_Data *d_data) {
     uint32_t *d_data_ptr = GetDataPtrHost(d_data);
-    CUDA_ASSERT_SUCCESS(cudaFree(d_data_ptr));
-    CUDA_ASSERT_SUCCESS(cudaFree(d_data));
+    CUDA_ASSERT_SUCCESS(cudaFreeAsync(d_data_ptr, g_cudaGlobalConf->asyncStream));
+    CUDA_ASSERT_SUCCESS(cudaFreeAsync(d_data, g_cudaGlobalConf->asyncStream));
 }

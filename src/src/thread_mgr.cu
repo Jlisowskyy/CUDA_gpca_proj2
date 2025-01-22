@@ -193,7 +193,10 @@ void ThreadMgr::_prepareBuckets(const BinSequencePack &pack, MgrTrieBuildData &d
     std::cout << "Acquired standard deviation: " << std_dev << " and mean: " << mean << '\n';
     std::cout << "Acquired deviation coef: " << dev_coef << '\n';
 
-    if (!enforce_gpu_build && dev_coef > kMaxDeviation) {
+    // if (!enforce_gpu_build && dev_coef > kMaxDeviation) {
+
+    /* TODO: currently only allow builds on CPU */
+    if (!enforce_gpu_build) {
         std::cout << "Standard deviation is too high!\n";
         std::cout << "Fallback to cpu algorithm\n";
         data.build_on_device = false;
