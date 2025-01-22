@@ -104,6 +104,7 @@ static void _testTrie(const size_t num_seq, cuda_Trie *d_trie, cuda_Data *d_data
     bool *d_result;
     CUDA_ASSERT_SUCCESS(cudaMalloc(&d_result, sizeof(bool) * num_seq));
     TestTrieBuild<<<1, 1>>>(d_trie, d_data, d_alloca, d_result);
+    CUDA_ASSERT_SUCCESS(cudaDeviceSynchronize());
 
     auto h_result = new bool[num_seq];
     CUDA_ASSERT_SUCCESS(cudaMemcpy(h_result, d_result, sizeof(bool) * num_seq, cudaMemcpyDeviceToHost));
