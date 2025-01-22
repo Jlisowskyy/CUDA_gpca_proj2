@@ -48,7 +48,9 @@ protected:
 
     void ParseGeneratorFlag_(ArgPack &arg_pack);
 
-    void ParseWriteDot(ArgPack &arg_pack);
+    void ParseWriteDot_(ArgPack &arg_pack);
+
+    void ParseVerboseFlag_(ArgPack &arg_pack);
 
     // ------------------------------
     // class fields

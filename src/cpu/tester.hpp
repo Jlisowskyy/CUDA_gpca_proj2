@@ -74,7 +74,7 @@ protected:
         std::cout << "Average time spent on a single sequence: " << timeMs / bin_sequence_pack.sequences.size() << "ms"
                 << std::endl;
 
-        // VerifySolution_(bin_sequence_pack, out);
+        VerifySolution_(bin_sequence_pack, out);
     }
 
     // ------------------------------

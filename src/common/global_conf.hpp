@@ -3,6 +3,7 @@
 
 struct ConfigStruct {
     bool WriteDotFiles = false;
+    bool Verbose = false;
 };
 
 extern ConfigStruct GlobalConfig;

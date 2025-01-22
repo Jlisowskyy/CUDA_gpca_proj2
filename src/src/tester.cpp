@@ -17,6 +17,7 @@
 #include <hamming.cuh>
 #include <cuda_tests.cuh>
 #include <defines.hpp>
+#include <global_conf.hpp>
 
 const char *Tester::TestNames[kMaxNumTests]{
     "cpu_single_naive",
@@ -367,6 +368,8 @@ void Tester::VerifySolution_(const BinSequencePack &bin_sequence_pack,
         bin_sequence_pack.solution.begin(), bin_sequence_pack.solution.end()
     };
 
+    std::cout << "Tested function returned: " << out.size() << " pairs" << std::endl;
+
     for (const auto &pair: out) {
         if (correct_set.contains(pair)) {
             correct_set.erase(pair);
@@ -374,13 +377,17 @@ void Tester::VerifySolution_(const BinSequencePack &bin_sequence_pack,
             correct_set.erase({pair.second, pair.first});
         } else {
             ++num_errors;
-            std::cout << "[ERROR] Generated additional pair: " << pair.first << " " << pair.second << std::endl;
+            if (GlobalConfig.Verbose) {
+                std::cout << "[ERROR] Generated additional pair: " << pair.first << " " << pair.second << std::endl;
+            }
         }
     }
 
     if (!correct_set.empty()) {
         for (const auto &[fst, snd]: correct_set) {
-            std::cout << "[ERROR] Missed pair: " << fst << " " << snd << std::endl;
+            if (GlobalConfig.Verbose) {
+                std::cout << "[ERROR] Missed pair: " << fst << " " << snd << std::endl;
+            }
             ++num_errors;
         }
     }

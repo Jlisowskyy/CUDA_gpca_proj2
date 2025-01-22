@@ -12,7 +12,8 @@
 std::unordered_map<std::string, void (ArgParser::*)(ArgPack &)> ArgParser::flag_parsers_{
     {"-t", &ArgParser::ParseTestFlag_},
     {"-g", &ArgParser::ParseGeneratorFlag_},
-    {"-d", &ArgParser::ParseWriteDot},
+    {"-d", &ArgParser::ParseWriteDot_},
+    {"-v", &ArgParser::ParseVerboseFlag_},
 };
 
 
@@ -44,6 +45,7 @@ void ArgParser::PrintHelp() {
             "- \"filename\" is the name of the file to be processed or saved to\n"
             "- \"-g\" is an optional flag to generate data\n"
             "- \"-t\" is an optional flag to run a specific test\n"
+            "- \"-v\" enables verbose mode\n"
             "- \"-d\" enables writing DOT files for displaying TRIEs\n\n";
 
     std::cout << "Available tests:\n";
@@ -102,6 +104,10 @@ void ArgParser::ParseGeneratorFlag_(ArgPack &arg_pack) {
     arg_pack.generator_name = generator_name;
 }
 
-void ArgParser::ParseWriteDot([[maybe_unused]] ArgPack &arg_pack) {
+void ArgParser::ParseWriteDot_([[maybe_unused]] ArgPack &arg_pack) {
     GlobalConfig.WriteDotFiles = true;
+}
+
+void ArgParser::ParseVerboseFlag_([[maybe_unused]] ArgPack &arg_pack) {
+    GlobalConfig.Verbose = true;
 }

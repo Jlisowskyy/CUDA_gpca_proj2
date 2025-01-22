@@ -17,7 +17,7 @@ void CalculateHammingDistancesSingleThreadNaive(const std::vector<BinSequence> &
                                                 const size_t offset,
                                                 std::vector<std::pair<size_t, size_t> > &out) {
     const auto &sequence = sequences[offset];
-
+// 50524
     for (size_t idx = offset + 1; idx < sequences.size(); ++idx) {
         const auto &other_sequence = sequences[idx];
         size_t distance = std::abs(
