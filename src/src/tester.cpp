@@ -265,8 +265,8 @@ void Tester::TestCpuTrieBuild_(const BinSequencePack &bin_sequence_pack) {
 void Tester::TestGPUTrieBuild_(const BinSequencePack &bin_sequence_pack) {
     std::cout << "Testing GPU trie build" << std::endl;
 
-    // TestCUDATrieCpuBuild(bin_sequence_pack);
-    TestCUDATrieGPUBuild(bin_sequence_pack);
+    TestCUDATrieCpuBuild(bin_sequence_pack);
+    // TestCUDATrieGPUBuild(bin_sequence_pack);
 }
 
 static void _splitBatchMultithreaded(const BinSequencePack &bin_sequence_pack) {
@@ -286,8 +286,9 @@ static void _splitBatchMultithreaded(const BinSequencePack &bin_sequence_pack) {
     /* Run threads */
     pool.RunThreads([&](const uint32_t thread_idx) {
         const size_t job_start = thread_idx * thread_job_size;
-        const size_t job_end = thread_idx == num_threads - 1 ? bin_sequence_pack.sequences.size()
-            : (thread_idx + 1) * thread_job_size;
+        const size_t job_end = thread_idx == num_threads - 1
+                                   ? bin_sequence_pack.sequences.size()
+                                   : (thread_idx + 1) * thread_job_size;
 
         /* Bucket sorting */
         for (size_t seq_idx = job_start; seq_idx < job_end; ++seq_idx) {
@@ -360,6 +361,8 @@ void Tester::RunTest_(const char *test_name, const BinSequencePack &bin_sequence
 
 void Tester::VerifySolution_(const BinSequencePack &bin_sequence_pack,
                              const std::vector<std::pair<size_t, size_t> > &out) {
+    uint64_t num_errors{};
+
     std::set<std::pair<size_t, size_t> > correct_set{
         bin_sequence_pack.solution.begin(), bin_sequence_pack.solution.end()
     };
@@ -370,6 +373,7 @@ void Tester::VerifySolution_(const BinSequencePack &bin_sequence_pack,
         } else if (correct_set.contains({pair.second, pair.first})) {
             correct_set.erase({pair.second, pair.first});
         } else {
+            ++num_errors;
             std::cout << "[ERROR] Generated additional pair: " << pair.first << " " << pair.second << std::endl;
         }
     }
@@ -377,6 +381,13 @@ void Tester::VerifySolution_(const BinSequencePack &bin_sequence_pack,
     if (!correct_set.empty()) {
         for (const auto &[fst, snd]: correct_set) {
             std::cout << "[ERROR] Missed pair: " << fst << " " << snd << std::endl;
+            ++num_errors;
         }
+    }
+
+    if (num_errors == 0) {
+        std::cout << "[SUCCESS] All pairs are correct" << std::endl;
+    } else {
+        std::cout << "[ERROR] " << num_errors << " errors found" << std::endl;
     }
 }

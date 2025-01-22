@@ -14,6 +14,14 @@ static constexpr size_t kGpuThreadChunkSize = 8 * kKb;
 static constexpr uint32_t kSpinLockFree = 0;
 static constexpr uint32_t kSpinLockLocked = 1;
 
+
+static constexpr uint64_t kPageSize = kMb * 512;
+static constexpr uint32_t kMaxPages = 64;
+static constexpr uint64_t kPageSizeInTypeSize = kPageSize / sizeof(Node_);
+
+static constexpr uint32_t kPageRemainder = kPageSizeInTypeSize - 1;
+static constexpr uint32_t kPageDivider = std::bit_floor(kPageSizeInTypeSize);
+
 class CpuSpinLock {
 public:
     explicit CpuSpinLock(volatile uint32_t &lock_base) : _lock_base(
@@ -68,10 +76,6 @@ class FastAllocator {
     // inner constants
     // ------------------------------
 
-    static constexpr uint64_t kPageSize = kMb * 512;
-    static constexpr uint32_t kMaxPages = 64;
-    static constexpr uint64_t kPageSizeInTypeSize = kPageSize / sizeof(Node_);
-
     static_assert(sizeof(Node_) == 16);
     static_assert(kPageSizeInTypeSize % 2 == 0);
 
@@ -120,13 +124,13 @@ public:
     [[nodiscard]] FAST_CALL_ALWAYS Node_ &operator[](const uint32_t idx) {
         assert(idx < kPageSizeInTypeSize * _last_page + _last_page_offset);
         assert(_pages[idx / kPageSizeInTypeSize] != nullptr);
-        return _pages[idx / kPageSizeInTypeSize][idx % kPageSizeInTypeSize];
+        return _pages[idx >> kPageDivider][idx & kPageRemainder];
     }
 
     [[nodiscard]] FAST_CALL_ALWAYS const Node_ &operator[](const uint32_t idx) const {
         assert(idx < kPageSizeInTypeSize * _last_page + _last_page_offset);
         assert(_pages[idx / kPageSizeInTypeSize] != nullptr);
-        return _pages[idx / kPageSizeInTypeSize][idx % kPageSizeInTypeSize];
+        return _pages[idx >> kPageDivider][idx & kPageRemainder];
     }
 
     template<bool isGpu = false>

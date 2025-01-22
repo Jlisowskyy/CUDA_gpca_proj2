@@ -45,6 +45,7 @@ public:
         _root_idx = 0;
     }
 
+    /* TODO: optimize same sequence insert */
     template<bool isGpu>
     HYBRID bool Insert(const uint32_t t_idx,
                        FastAllocator &allocator,

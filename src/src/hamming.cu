@@ -26,6 +26,7 @@ static std::vector<std::tuple<uint32_t, uint32_t> > Hamming1Distance(cuda_Trie *
 // Kernels
 // ------------------------------
 
+// TODO: Does not work due to allocator deadlock
 __global__ void BuildTrieKernel(cuda_Trie *out_tries,
                                 const uint32_t *buckets,
                                 const uint32_t *bucket_sizes,
