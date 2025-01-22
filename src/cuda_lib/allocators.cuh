@@ -76,6 +76,10 @@ public:
         /* prepare allocator data */
         _last_page = 0;
         _last_page_offset = num_threads * _thread_chunk_size_in_type;
+        _spin_lock = kSpinLockFree;
+
+        assert(_last_page_offset < kPageSizeInTypeSize);
+        assert(_last_page < kMaxPages);
     }
 
     // ------------------------------
@@ -100,7 +104,7 @@ public:
         uint32_t top = _thread_tops[t_idx]++;
 
         /* check if we need new chunk - lazy allocation */
-        if (top > _thread_chunk_size_in_type) {
+        if (top == _thread_chunk_size_in_type) {
             /* get new chunk */
             if constexpr (isGpu) {
             } else {
@@ -108,17 +112,21 @@ public:
             }
 
             /* already offset for new chunk */
-            _thread_tops[t_idx] = 1;
-
             top = 0;
+            _thread_tops[t_idx] = 1;
         }
 
+        assert(_thread_tops[t_idx] <= _thread_chunk_size_in_type);
         return _thread_bottoms[t_idx] + top;
     }
 
     // ------------------------------
     // Management methods
     // ------------------------------
+
+    [[nodiscard]] size_t GetNumNodesAllocated() const {
+        return _last_page * kPageSizeInTypeSize + _last_page_offset;
+    }
 
     void DeallocHost() {
         for (uint32_t page_idx = 0; page_idx <= _last_page; ++page_idx) {
@@ -214,7 +222,7 @@ public:
         auto h_pages = new Node_ *[kMaxPages]{};
 
         /* copy pointer to pages */
-        Node_** d_pages;
+        Node_ **d_pages;
         CUDA_ASSERT_SUCCESS(
             cudaMemcpyAsync(&d_pages, &allocator->_pages, sizeof(Node_ **), cudaMemcpyDeviceToHost,
                 g_cudaGlobalConf->asyncStream));
@@ -272,7 +280,7 @@ protected:
 
         uint32_t page_offset = _last_page_offset;
         _last_page_offset += _thread_chunk_size_in_type;
-        if (_last_page_offset > kPageSizeInTypeSize) {
+        if (page_offset == kPageSizeInTypeSize) {
             /* we exhausted current page -> we need new one */
             /* performed in lazy manner */
 
@@ -282,13 +290,17 @@ protected:
             _pages[_last_page] = new Node_[kPageSizeInTypeSize];
 
             /* already offset for new chunk */
-            _last_page_offset = _thread_chunk_size_in_type;
             page_offset = 0;
+            _last_page_offset = _thread_chunk_size_in_type;
         }
 
+        assert(
+            static_cast<uint64_t>(_last_page) * kPageSizeInTypeSize + static_cast<uint64_t>(page_offset) <= static_cast<
+            uint64_t>(UINT32_MAX));
         const uint32_t idx = _last_page * kPageSizeInTypeSize + page_offset;
         lock.unlock();
 
+        assert(_last_page_offset <= kPageSizeInTypeSize);
         return idx;
     }
 

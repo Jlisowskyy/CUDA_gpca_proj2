@@ -72,7 +72,7 @@ else ()
 
         set_source_files_properties(
                 ${CUDA_SOURCES}
-                PROPERTIES COMPILE_OPTIONS "-v;--generate-line-info;-g3;-fno-omit-frame-pointer;-g"
+                PROPERTIES COMPILE_OPTIONS "-v;--generate-line-info;-g3;-fno-omit-frame-pointer;-g;-G;-O0"
         )
 
         set_source_files_properties(

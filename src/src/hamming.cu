@@ -95,6 +95,10 @@ __global__ void TestTrieBuild(const cuda_Trie *trie, const cuda_Data *data, cons
     const uint32_t num_threads = gridDim.x * blockDim.x;
 
     for (uint32_t idx = thread_idx; idx < data->GetNumSequences(); idx += num_threads) {
+        if (idx == 18753) {
+            printf("dupa");
+        }
+
         result[idx] = trie->Search(*alloca, idx, *data);
     }
 }
@@ -266,6 +270,8 @@ static std::tuple<cuda_Trie *, cuda_Data *, FastAllocator *> _buildOnHost(const 
     final_trie.MergeByPrefixHost(cuda_allocator, data, tries, power_of_2);
 
     const auto t_build_end = std::chrono::high_resolution_clock::now();
+
+    std::cout << "Slots used: " << cuda_allocator.GetNumNodesAllocated() << std::endl;
 
     std::cout << "Trie build time using CPU: "
             << std::chrono::duration_cast<std::chrono::milliseconds>(t_build_end - t_build_start).count() << "ms"
