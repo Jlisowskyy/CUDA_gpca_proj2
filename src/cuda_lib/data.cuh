@@ -50,10 +50,8 @@ public:
     // ------------------------------
 
     void FAST_DCALL_ALWAYS PushSolution(const uint32_t idx1, const uint32_t idx2) {
-        printf("sol\n");
-
         const auto address =
-                reinterpret_cast<uint32_t *>(atomicAdd(reinterpret_cast<unsigned long long int *>(&_data), 2));
+                reinterpret_cast<uint32_t *>(atomicAdd(reinterpret_cast<unsigned long long int *>(&_data), 2*sizeof(uint32_t)));
 
         address[0] = idx1;
         address[1] = idx2;
@@ -138,7 +136,7 @@ public:
                 return false;
             }
 
-            for (uint32_t b_idx = 0; b_idx < GetSequenceLength(); ++b_idx) {
+            for (uint32_t b_idx = bit_idx; b_idx < GetSequenceLength(); ++b_idx) {
                 if (GetBit(b_idx) != other.GetBit(b_idx)) {
                     return false;
                 }

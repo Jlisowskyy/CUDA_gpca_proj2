@@ -330,9 +330,13 @@ std::vector<std::tuple<uint32_t, uint32_t> > Hamming1Distance(cuda_Trie *d_trie,
     // Processing
     // ------------------------------
 
+    CUDA_ASSERT_SUCCESS(cudaStreamSynchronize(g_cudaGlobalConf->asyncStream));
+
     /* find all pairs */
     FindAllHamming1Pairs<<<mgr_data.num_blocks, mgr_data.num_threads_per_block, 0, g_cudaGlobalConf->asyncStream>>>(
         d_trie, d_allocator, d_data, d_sol);
+
+    CUDA_ASSERT_SUCCESS(cudaStreamSynchronize(g_cudaGlobalConf->asyncStream));
 
     // ------------------------------
     // Mem back transfer

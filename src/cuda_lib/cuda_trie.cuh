@@ -162,8 +162,8 @@ public:
         uint32_t node_idx = _root_idx;
 
         /* follow the path */
-        while (node_idx && bit_idx < sequence.GetSequenceLength()
-               && (allocator[node_idx].next[0] || allocator[node_idx].next[1])) {
+        while (node_idx && (allocator[node_idx].next[0] || allocator[node_idx].next[1])
+               && bit_idx < sequence.GetSequenceLength()) {
             const bool bit = sequence.GetBit(bit_idx++);
 
             /* Try path with flipped bit */
@@ -178,7 +178,7 @@ public:
             node_idx = allocator[node_idx].next[bit];
         }
 
-        if (!node_idx) {
+        if (node_idx == 0) {
             /* no path found */
             return;
         }
@@ -193,8 +193,11 @@ public:
             }
         }
 
-        /* TODO: assert here */
+        assert(
+            (node_idx != 0 && allocator[node_idx].seq_idx == seq_idx) || sequence.Compare(data[allocator[node_idx].
+                seq_idx]));
     }
+
 
     [[nodiscard]] cuda_Trie *DumpToGpu() const;
 
@@ -302,28 +305,23 @@ private:
     __device__ void _tryToFindPair(uint32_t node_idx, uint32_t bit_idx, const uint32_t seq_idx,
                                    const FastAllocator &allocator,
                                    const cuda_Data &data, cuda_Solution &solutions) const {
-        /* Check if we have a valid node */
-        if (!node_idx) {
-            return;
-        }
-
         /*  Use original sequence to follow path after the flipped bit */
         const auto sequence = data[seq_idx];
 
         /* Follow the path */
-        while (node_idx && (allocator[node_idx].next[0] || allocator[node_idx].next[1])
+        while (node_idx != 0 && (allocator[node_idx].next[0] || allocator[node_idx].next[1])
                && bit_idx < sequence.GetSequenceLength()) {
             node_idx = allocator[node_idx].next[sequence.GetBit(bit_idx++)];
         }
 
         /* Check if we found a valid sequence */
-        if (!node_idx) {
+        if (node_idx == 0) {
             return;
         }
 
         /* Check if remaining bits match after the single flip */
-        if (const auto other_sequence = data[allocator[node_idx].seq_idx];
-            seq_idx < allocator[node_idx].seq_idx && sequence.Compare(other_sequence, bit_idx)) {
+        const auto other_sequence = data[allocator[node_idx].seq_idx];
+        if (seq_idx < allocator[node_idx].seq_idx && sequence.Compare(other_sequence, bit_idx)) {
             solutions.PushSolution(seq_idx, allocator[node_idx].seq_idx);
         }
     }

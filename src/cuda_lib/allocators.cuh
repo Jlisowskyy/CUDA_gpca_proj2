@@ -124,12 +124,14 @@ public:
     [[nodiscard]] FAST_CALL_ALWAYS Node_ &operator[](const uint32_t idx) {
         assert(idx < kPageSizeInTypeSize * _last_page + _last_page_offset);
         assert(_pages[idx / kPageSizeInTypeSize] != nullptr);
+        assert(idx != 0);
         return _pages[idx >> kPageDivider][idx & kPageRemainder];
     }
 
     [[nodiscard]] FAST_CALL_ALWAYS const Node_ &operator[](const uint32_t idx) const {
         assert(idx < kPageSizeInTypeSize * _last_page + _last_page_offset);
         assert(_pages[idx / kPageSizeInTypeSize] != nullptr);
+        assert(idx != 0);
         return _pages[idx >> kPageDivider][idx & kPageRemainder];
     }
 
@@ -153,6 +155,7 @@ public:
         }
 
         assert(_thread_tops[t_idx] <= _thread_chunk_size_in_type);
+        assert(_thread_bottoms[t_idx] + top != 0);
         return _thread_bottoms[t_idx] + top;
     }
 

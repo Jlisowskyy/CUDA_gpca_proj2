@@ -79,8 +79,6 @@ void Trie::FindPairs(const uint32_t idx, std::vector<std::pair<size_t, size_t> >
                 out.emplace_back(i->idx, idx);
             }
         }
-
-        return;
     }
 
     /* Validate we found our sequence */
@@ -89,11 +87,6 @@ void Trie::FindPairs(const uint32_t idx, std::vector<std::pair<size_t, size_t> >
 
 void Trie::_tryToFindPair(Node_ *p, const uint32_t idx, uint32_t bit_idx,
                           std::vector<std::pair<size_t, size_t> > &out) {
-    /* Check if we have a valid node */
-    if (!p) {
-        return;
-    }
-
     /*  Use original sequence to follow path after the flipped bit */
     const BinSequence &sequence = (*_sequences)[idx];
 

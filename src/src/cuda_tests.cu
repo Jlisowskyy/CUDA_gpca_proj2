@@ -34,5 +34,22 @@ void TestCudaData(const BinSequencePack &data) {
         }
     }
 
+    /* test compare */
+    for (size_t idx = 0; idx < data.sequences.size(); ++idx) {
+        const size_t next_idx = (idx + 1) % data.sequences.size();
+
+        /* compare with itself */
+        if (!cuda_data[idx].Compare(cuda_data[idx])) {
+            std::cerr << "Self compare failed" << std::endl;
+            return;
+        }
+
+        /* compare with next */
+        if (cuda_data[idx].Compare(cuda_data[next_idx])) {
+            std::cerr << "Next compare failed" << std::endl;
+            return;
+        }
+    }
+
     std::cout << "Test passed" << std::endl;
 }
