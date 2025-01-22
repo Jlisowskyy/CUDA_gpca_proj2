@@ -3,6 +3,7 @@
 
 /* external includes */
 #include <barrier>
+#include <global_conf.cuh>
 #include <iostream>
 #include <memory>
 
@@ -50,18 +51,22 @@ cuda_Data *cuda_Data::DumpToGPU() const {
     /* allocate manager object */
     cuda_Data *d_data;
 
-    CUDA_ASSERT_SUCCESS(cudaMalloc(&d_data, sizeof(cuda_Data)));
-    CUDA_ASSERT_SUCCESS(cudaMemcpy(d_data, this, sizeof(cuda_Data), cudaMemcpyHostToDevice));
+    CUDA_ASSERT_SUCCESS(cudaMallocAsync(&d_data, sizeof(cuda_Data), g_cudaGlobalConf->asyncStream));
+    CUDA_ASSERT_SUCCESS(
+        cudaMemcpyAsync(d_data, this, sizeof(cuda_Data), cudaMemcpyHostToDevice, g_cudaGlobalConf->asyncStream));
 
     /* allocate data itself */
     uint32_t *d_data_data;
 
     const size_t data_size = _num_sequences_padded32 * (_max_sequence_length + 1) * sizeof(uint32_t);
-    CUDA_ASSERT_SUCCESS(cudaMalloc(&d_data_data, data_size));
-    CUDA_ASSERT_SUCCESS(cudaMemcpy(d_data_data, _data, data_size, cudaMemcpyHostToDevice));
+    CUDA_ASSERT_SUCCESS(cudaMallocAsync(&d_data_data, data_size, g_cudaGlobalConf->asyncStream));
+    CUDA_ASSERT_SUCCESS(
+        cudaMemcpyAsync(d_data_data, _data, data_size, cudaMemcpyHostToDevice, g_cudaGlobalConf->asyncStream));
 
     /* update manager object */
-    CUDA_ASSERT_SUCCESS(cudaMemcpy(&d_data->_data, &d_data_data, sizeof(uint32_t *), cudaMemcpyHostToDevice));
+    CUDA_ASSERT_SUCCESS(
+        cudaMemcpyAsync(&d_data->_data, &d_data_data, sizeof(uint32_t *), cudaMemcpyHostToDevice, g_cudaGlobalConf->
+            asyncStream));
 
     return d_data;
 }

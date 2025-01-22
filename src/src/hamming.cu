@@ -95,10 +95,6 @@ __global__ void TestTrieBuild(const cuda_Trie *trie, const cuda_Data *data, cons
     const uint32_t num_threads = gridDim.x * blockDim.x;
 
     for (uint32_t idx = thread_idx; idx < data->GetNumSequences(); idx += num_threads) {
-        if (idx == 18753) {
-            printf("dupa");
-        }
-
         result[idx] = trie->Search(*alloca, idx, *data);
     }
 }
@@ -194,12 +190,8 @@ static std::tuple<cuda_Trie *, cuda_Data *, FastAllocator *> _buildOnDevice(
 }
 
 static std::tuple<cuda_Trie *, cuda_Data *, FastAllocator *> _buildOnHost(const BinSequencePack &pack) {
-    const auto [num_threads, prefix_mask, power_of_2] = GetBatchSplitData();
-
-    std::cout << "Preparing data..." << std::endl;
-    const auto t_build_start = std::chrono::high_resolution_clock::now();
-
     /* split sequences into `num_threads` buckets */
+    const auto [num_threads, prefix_mask, power_of_2] = GetBatchSplitData();
 
     /* prepare allocator */
     BigChunkAllocator allocator(kDefaultAllocChunkSize, num_threads);
@@ -212,8 +204,10 @@ static std::tuple<cuda_Trie *, cuda_Data *, FastAllocator *> _buildOnHost(const 
     std::barrier barrier(static_cast<ptrdiff_t>(num_threads));
     const size_t thread_job_size = pack.sequences.size() / num_threads;
 
+    /* Prepare data */
     cuda_Data data{pack};
-    /* Dump before creating cuda_alloc to know available memory */
+
+    /* initialize data to device transfer */
     cuda_Data *d_data = data.DumpToGPU();
 
     /* Prepare cuda alloca */
@@ -222,8 +216,6 @@ static std::tuple<cuda_Trie *, cuda_Data *, FastAllocator *> _buildOnHost(const 
     /* Prepare tries */
     std::vector<cuda_Trie> tries;
     tries.resize(num_threads);
-
-    std::cout << "Sorting sequences..." << std::endl;
 
     /* Run threads */
     pool.RunThreads([&](const uint32_t thread_idx) {
@@ -244,11 +236,10 @@ static std::tuple<cuda_Trie *, cuda_Data *, FastAllocator *> _buildOnHost(const 
         if (thread_idx == 0) {
             buckets.MergeBuckets();
 
-            std::cout << "Bucket stats: " << std::endl;
+            std::cout << "Bucket stats:\n";
             for (size_t b_idx = 0; b_idx < num_threads; ++b_idx) {
-                std::cout << "Bucket " << b_idx << " size: " << buckets.GetBucketSize(b_idx) << std::endl;
+                std::cout << "Bucket " << b_idx << " size: " << buckets.GetBucketSize(b_idx) << '\n';
             }
-            std::cout << "Started trie build..." << std::endl;
         }
 
         /* wait for bucket merge */
@@ -263,19 +254,12 @@ static std::tuple<cuda_Trie *, cuda_Data *, FastAllocator *> _buildOnHost(const 
         }
     });
 
+    /*  wait for trie build end */
     pool.Wait();
 
     /* merge tries */
     cuda_Trie final_trie{};
     final_trie.MergeByPrefixHost(cuda_allocator, data, tries, power_of_2);
-
-    const auto t_build_end = std::chrono::high_resolution_clock::now();
-
-    std::cout << "Slots used: " << cuda_allocator.GetNumNodesAllocated() << std::endl;
-
-    std::cout << "Trie build time using CPU: "
-            << std::chrono::duration_cast<std::chrono::milliseconds>(t_build_end - t_build_start).count() << "ms"
-            << std::endl;
 
     if (GlobalConfig.WriteDotFiles) {
         const bool result = final_trie.DumpToDotFile(cuda_allocator, data, "/tmp/trie.dot", "TRIE");
@@ -283,19 +267,14 @@ static std::tuple<cuda_Trie *, cuda_Data *, FastAllocator *> _buildOnHost(const 
     }
 
     /* transfer data to GPU */
-    const auto t_transfer_start = std::chrono::high_resolution_clock::now();
-
     cuda_Trie *d_trie = final_trie.DumpToGpu();
     FastAllocator *d_allocator = cuda_allocator.DumpToGPU();
 
+    /* wait to finish transfer */
+    CUDA_ASSERT_SUCCESS(cudaStreamSynchronize(g_cudaGlobalConf->asyncStream));
+
     data.DeallocHost();
     cuda_allocator.DeallocHost();
-
-    const auto t_transfer_end = std::chrono::high_resolution_clock::now();
-
-    std::cout << "Memory transfer time: "
-            << std::chrono::duration_cast<std::chrono::milliseconds>(t_transfer_end - t_transfer_start).count() << "ms"
-            << std::endl;
 
     return {d_trie, d_data, d_allocator};
 }
@@ -420,14 +399,34 @@ std::vector<std::tuple<uint32_t, uint32_t> > FindHamming1PairsCUDA(const BinSequ
 }
 
 void TestCUDATrieCpuBuild(const BinSequencePack &pack) {
+    const auto t1 = std::chrono::high_resolution_clock::now();
     const auto [d_trie, d_data, d_alloca] = _buildOnHost(pack);
+    const auto t2 = std::chrono::high_resolution_clock::now();
+
+    std::cout << "Time spent on TRIE build and memory transfer: "
+            << std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() << "ms" << std::endl;
+
     _testTrie(pack.sequences.size(), d_trie, d_data, d_alloca);
 }
 
 void TestCUDATrieGPUBuild(const BinSequencePack &pack) {
     const ThreadMgr mgr{};
-    const auto mgr_data = mgr.PrepareTrieBuildData(pack, true);
 
+    const auto t_mgr_start = std::chrono::high_resolution_clock::now();
+    const auto mgr_data = mgr.PrepareTrieBuildData(pack, true);
+    const auto t_mgr_end = std::chrono::high_resolution_clock::now();
+
+    std::cout << "Time spent on management data preparation: "
+            << std::chrono::duration_cast<std::chrono::milliseconds>(t_mgr_end - t_mgr_start).count() << "ms" <<
+            std::endl;
+
+    const auto t_trie_build_start = std::chrono::high_resolution_clock::now();
     const auto [d_trie, d_data, d_alloca] = _buildOnDevice(mgr_data, pack);
+    const auto t_trie_build_end = std::chrono::high_resolution_clock::now();
+
+    std::cout << "Time spent on TRIE build and memory transfer: "
+            << std::chrono::duration_cast<std::chrono::milliseconds>(t_trie_build_end - t_trie_build_start).count()
+            << "ms" << std::endl;
+
     _testTrie(pack.sequences.size(), d_trie, d_data, d_alloca);
 }

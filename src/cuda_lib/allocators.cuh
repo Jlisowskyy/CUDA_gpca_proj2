@@ -78,6 +78,9 @@ public:
         _last_page_offset = num_threads * _thread_chunk_size_in_type;
         _spin_lock = kSpinLockFree;
 
+        /* ensure no null pointer is allocated */
+        _thread_tops[0] = 1;
+
         assert(_last_page_offset < kPageSizeInTypeSize);
         assert(_last_page < kMaxPages);
     }
