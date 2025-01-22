@@ -5,6 +5,7 @@
 #include <thread_mgr.cuh>
 #include <thread_pool.hpp>
 #include <allocators.hpp>
+#include <allocators.cuh>
 
 /* external includes */
 #include <chrono>
@@ -16,10 +17,10 @@
 #include <errno.h>
 #include <global_conf.hpp>
 
-static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> InitHamming(const BinSequencePack &pack);
+static std::tuple<cuda_Trie *, cuda_Data *, FastAllocator *> InitHamming(const BinSequencePack &pack);
 
 static std::vector<std::tuple<uint32_t, uint32_t> > Hamming1Distance(cuda_Trie *d_trie, cuda_Data *d_data,
-                                                                     cuda_Allocator *d_allocator);
+                                                                     FastAllocator *d_allocator);
 
 // ------------------------------
 // Kernels
@@ -31,7 +32,7 @@ __global__ void BuildTrieKernel(cuda_Trie *out_tries,
                                 const uint32_t prefix_len,
                                 const uint32_t max_occup,
                                 const cuda_Data *data,
-                                cuda_Allocator *allocator) {
+                                FastAllocator *allocator) {
     const uint32_t thread_idx = blockIdx.x * blockDim.x + threadIdx.x;
     const uint32_t num_threads = gridDim.x * blockDim.x;
 
@@ -48,14 +49,7 @@ __global__ void BuildTrieKernel(cuda_Trie *out_tries,
         const uint32_t seq_idx = buckets[bucket_offset * num_threads + thread_idx];
         assert(seq_idx < data->GetNumSequences());
 
-        my_trie.Insert(thread_idx, *allocator, seq_idx, prefix_len, *data);
-
-        allocator->Consolidate(thread_idx);
-    }
-
-    /* consolidate with rest of the threads */
-    while (bucket_offset++ < max_occup) {
-        allocator->Consolidate(thread_idx);
+        my_trie.Insert<true>(thread_idx, *allocator, seq_idx, prefix_len, *data);
     }
 
     /* wait for all threads to finish */
@@ -84,7 +78,7 @@ __global__ void BuildTrieKernel(cuda_Trie *out_tries,
     // }
 }
 
-__global__ void FindAllHamming1Pairs(const cuda_Trie *out_trie, const cuda_Allocator *alloca, const cuda_Data *data,
+__global__ void FindAllHamming1Pairs(const cuda_Trie *out_trie, const FastAllocator *alloca, const cuda_Data *data,
                                      cuda_Solution *solutions) {
     const uint32_t thread_idx = blockIdx.x * blockDim.x + threadIdx.x;
     const uint32_t num_threads = gridDim.x * blockDim.x;
@@ -95,7 +89,7 @@ __global__ void FindAllHamming1Pairs(const cuda_Trie *out_trie, const cuda_Alloc
     }
 }
 
-__global__ void TestTrieBuild(const cuda_Trie *trie, const cuda_Data *data, const cuda_Allocator *alloca,
+__global__ void TestTrieBuild(const cuda_Trie *trie, const cuda_Data *data, const FastAllocator *alloca,
                               bool *result) {
     for (size_t idx = 0; idx < data->GetNumSequences(); ++idx) {
         result[idx] = trie->Search(*alloca, idx, *data);
@@ -106,7 +100,7 @@ __global__ void TestTrieBuild(const cuda_Trie *trie, const cuda_Data *data, cons
 // Static functions
 // ------------------------------
 
-static void _testTrie(const size_t num_seq, cuda_Trie *d_trie, cuda_Data *d_data, cuda_Allocator *d_alloca) {
+static void _testTrie(const size_t num_seq, cuda_Trie *d_trie, cuda_Data *d_data, FastAllocator *d_alloca) {
     bool *d_result;
     CUDA_ASSERT_SUCCESS(cudaMalloc(&d_result, sizeof(bool) * num_seq));
     TestTrieBuild<<<1, 1>>>(d_trie, d_data, d_alloca, d_result);
@@ -131,11 +125,11 @@ static void _testTrie(const size_t num_seq, cuda_Trie *d_trie, cuda_Data *d_data
 
     CUDA_ASSERT_SUCCESS(cudaFree(d_trie));
     cuda_Data::DeallocGPU(d_data);
-    cuda_Allocator::DeallocGPU(d_alloca);
+    FastAllocator::DeallocGPU(d_alloca);
     delete h_result;
 }
 
-static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnDevice(
+static std::tuple<cuda_Trie *, cuda_Data *, FastAllocator *> _buildOnDevice(
     const MgrTrieBuildData &mgr_data, const BinSequencePack &pack) {
     /* prepare GPU data */
     std::cout << "Preparing GPU data..." << std::endl;
@@ -146,8 +140,8 @@ static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnDevice(
     cuda_Data *d_data = data.DumpToGPU();
 
     /* prepare allocator */
-    cuda_Allocator allocator(mgr_data.max_nodes, mgr_data.max_threads, mgr_data.max_nodes_per_thread);
-    cuda_Allocator *d_allocator = allocator.DumpToGPU();
+    FastAllocator allocator(kGpuThreadChunkSize, mgr_data.max_threads);
+    FastAllocator *d_allocator = allocator.DumpToGPU();
 
     cuda_Trie *d_tries;
     CUDA_ASSERT_SUCCESS(cudaMalloc(&d_tries, mgr_data.max_threads * sizeof(cuda_Trie)));
@@ -191,7 +185,7 @@ static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnDevice(
     return {d_tries, d_data, d_allocator};
 }
 
-static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnHost(const BinSequencePack &pack) {
+static std::tuple<cuda_Trie *, cuda_Data *, FastAllocator *> _buildOnHost(const BinSequencePack &pack) {
     const auto [num_threads, prefix_mask, power_of_2] = GetBatchSplitData();
 
     std::cout << "Preparing data..." << std::endl;
@@ -215,7 +209,7 @@ static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnHost(const
     cuda_Data *d_data = data.DumpToGPU();
 
     /* Prepare cuda alloca */
-    cuda_Allocator cuda_allocator(pack.sequences.size() * pack.max_seq_size_bits, num_threads, pack.max_seq_size_bits);
+    FastAllocator cuda_allocator(kCpuThreadChunkSize, num_threads);
 
     /* Prepare tries */
     std::vector<cuda_Trie> tries;
@@ -257,9 +251,7 @@ static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnHost(const
 
         while (!buckets.IsEmpty(thread_idx)) {
             const auto seq_idx = buckets.PopBucket(thread_idx);
-            trie.Insert(thread_idx, cuda_allocator, seq_idx, power_of_2, data);
-
-            cuda_allocator.ConsolidateHost(thread_idx, barrier, buckets.IsEmpty(thread_idx));
+            trie.Insert<false>(thread_idx, cuda_allocator, seq_idx, power_of_2, data);
         }
     });
 
@@ -267,8 +259,6 @@ static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnHost(const
 
     /* merge tries */
     cuda_Trie final_trie{};
-
-    std::cout << "Merging tries..." << std::endl;
     final_trie.MergeByPrefixHost(cuda_allocator, data, tries, power_of_2);
 
     const auto t_build_end = std::chrono::high_resolution_clock::now();
@@ -276,8 +266,6 @@ static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnHost(const
     std::cout << "Trie build time using CPU: "
             << std::chrono::duration_cast<std::chrono::milliseconds>(t_build_end - t_build_start).count() << "ms"
             << std::endl;
-
-    cuda_allocator.DisplayAllocInfo();
 
     if (GlobalConfig.WriteDotFiles) {
         const bool result = final_trie.DumpToDotFile(cuda_allocator, data, "/tmp/trie.dot", "TRIE");
@@ -288,7 +276,7 @@ static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnHost(const
     const auto t_transfer_start = std::chrono::high_resolution_clock::now();
 
     cuda_Trie *d_trie = final_trie.DumpToGpu();
-    cuda_Allocator *d_allocator = cuda_allocator.DumpToGPU();
+    FastAllocator *d_allocator = cuda_allocator.DumpToGPU();
 
     data.DeallocHost();
     cuda_allocator.DeallocHost();
@@ -306,7 +294,7 @@ static std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> _buildOnHost(const
 // GPU interface functions
 // ------------------------------
 
-std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> InitHamming(const BinSequencePack &pack) {
+std::tuple<cuda_Trie *, cuda_Data *, FastAllocator *> InitHamming(const BinSequencePack &pack) {
     /* calculate management data */
     const ThreadMgr mgr{};
     const auto mgr_data = mgr.PrepareTrieBuildData(pack);
@@ -321,7 +309,7 @@ std::tuple<cuda_Trie *, cuda_Data *, cuda_Allocator *> InitHamming(const BinSequ
 }
 
 std::vector<std::tuple<uint32_t, uint32_t> > Hamming1Distance(cuda_Trie *d_trie, cuda_Data *d_data,
-                                                              cuda_Allocator *d_allocator) {
+                                                              FastAllocator *d_allocator) {
     // ------------------------------
     // Mem init
     // ------------------------------
@@ -402,7 +390,7 @@ std::vector<std::tuple<uint32_t, uint32_t> > Hamming1Distance(cuda_Trie *d_trie,
     cuda_Data::DeallocGPU(d_data);
 
     /* cleanup allocator */
-    cuda_Allocator::DeallocGPU(d_allocator);
+    FastAllocator::DeallocGPU(d_allocator);
 
     /* cleanup trie */
     CUDA_ASSERT_SUCCESS(cudaFree(d_trie));
