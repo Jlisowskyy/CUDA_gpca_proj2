@@ -56,27 +56,27 @@ __global__ void BuildTrieKernel(cuda_Trie *out_tries,
     /* wait for all threads to finish */
     __syncthreads();
 
-    /* start merging by logarithmic reduction */
-    uint32_t other_thread_idx = thread_idx;
-    for (auto bit_pos = static_cast<int32_t>(prefix_len - 1); bit_pos >= 0; --bit_pos) {
-        const uint32_t mask = static_cast<uint32_t>(1) << bit_pos;
-
-        if ((thread_idx & mask) != 0) {
-            /* only threads with 0 on given position will merge */
-            return;
-        }
-
-        /* remove next bit */
-        other_thread_idx &= ~mask;
-
-        /* take the other trie */
-        cuda_Trie &other_trie = out_tries[other_thread_idx | mask];
-
-        my_trie.MergeWithOther<true>(thread_idx, other_trie, *allocator);
-
-        /* wait for other thread to finish */
-        __syncthreads();
-    }
+    // /* start merging by logarithmic reduction */
+    // uint32_t other_thread_idx = thread_idx;
+    // for (auto bit_pos = static_cast<int32_t>(prefix_len - 1); bit_pos >= 0; --bit_pos) {
+    //     const uint32_t mask = static_cast<uint32_t>(1) << bit_pos;
+    //
+    //     if ((thread_idx & mask) != 0) {
+    //         /* only threads with 0 on given position will merge */
+    //         return;
+    //     }
+    //
+    //     /* remove next bit */
+    //     other_thread_idx &= ~mask;
+    //
+    //     /* take the other trie */
+    //     cuda_Trie &other_trie = out_tries[other_thread_idx | mask];
+    //
+    //     my_trie.MergeWithOther<true>(thread_idx, other_trie, *allocator);
+    //
+    //     /* wait for other thread to finish */
+    //     __syncthreads();
+    // }
 }
 
 __global__ void FindAllHamming1Pairs(const cuda_Trie *out_trie, const FastAllocator *alloca, const cuda_Data *data,
@@ -166,6 +166,7 @@ static std::tuple<cuda_Trie *, cuda_Data *, FastAllocator *> _buildOnDevice(
         d_data,
         d_allocator
     );
+    CUDA_ASSERT_SUCCESS(cudaStreamSynchronize(g_cudaGlobalConf->asyncStream));
 
     // ------------------------------
     // Cleanup

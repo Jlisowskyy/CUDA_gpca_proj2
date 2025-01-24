@@ -40,7 +40,6 @@ static constexpr uint32_t GenMask(const uint32_t size) {
 // Constants
 // ------------------------------
 
-/* TODO: replace with bucket search logic */
 static constexpr uint32_t kPrefixSize = 15;
 
 // ------------------------------
@@ -50,9 +49,7 @@ static constexpr uint32_t kPrefixSize = 15;
 MgrTrieBuildData ThreadMgr::PrepareTrieBuildData(const BinSequencePack &pack, bool enforce_gpu_build) const {
     /* TODO: adjust */
     static constexpr uint32_t kMaxThreads = pow2(kPrefixSize);
-
-    /* TODO: adjust */
-    static constexpr uint32_t kNumThreadsPerBlock = 512;
+    static constexpr uint32_t kNumThreadsPerBlock = 32;
 
     MgrTrieBuildData data{};
 
@@ -64,6 +61,7 @@ MgrTrieBuildData ThreadMgr::PrepareTrieBuildData(const BinSequencePack &pack, bo
     /* fill trie kernel management */
     data.num_threads_per_block = kNumThreadsPerBlock;
     data.num_blocks = data.max_threads / data.num_threads_per_block;
+    assert(data.num_blocks <= 1024 && "Too many blocks");
 
     const auto t_bucket_start = std::chrono::high_resolution_clock::now();
     _prepareBuckets(pack, data, enforce_gpu_build);
@@ -80,11 +78,8 @@ MgrTrieSearchData ThreadMgr::PrepareSearchData() const {
     /* TODO: replace with some logic */
     static constexpr uint32_t kMaxSolutions = 1'000'00;
 
-    /* TODO: adjust */
-    static constexpr uint32_t kThreadsPerBlock = 1024;
-
-    /* TODO: adjust */
-    static constexpr uint32_t kMaxBlocks = 1024;
+    static constexpr uint32_t kThreadsPerBlock = 512;
+    static constexpr uint32_t kMaxBlocks = 128;
 
     MgrTrieSearchData data{};
 

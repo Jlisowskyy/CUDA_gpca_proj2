@@ -137,26 +137,11 @@ public:
 
     template<bool isGpu = false>
     [[nodiscard]] FAST_CALL_ALWAYS uint32_t AllocateNode(const uint32_t t_idx) {
-        /* get current thread top */
-        uint32_t top = _thread_tops[t_idx]++;
-
-        /* check if we need new chunk - lazy allocation */
-        if (top == _thread_chunk_size_in_type) {
-            /* get new chunk */
-            if constexpr (isGpu) {
-                _thread_bottoms[t_idx] = _AllocateNewChunkGpu();
-            } else {
-                _thread_bottoms[t_idx] = _AllocateNewChunkCpu();
-            }
-
-            /* already offset for new chunk */
-            top = 0;
-            _thread_tops[t_idx] = 1;
+        if constexpr (isGpu) {
+            return _AllocateNodeGpu(t_idx);
+        } else {
+            return _AllocateNodeCpu(t_idx);
         }
-
-        assert(_thread_tops[t_idx] <= _thread_chunk_size_in_type);
-        assert(_thread_bottoms[t_idx] + top != 0);
-        return _thread_bottoms[t_idx] + top;
     }
 
     // ------------------------------
@@ -341,33 +326,137 @@ protected:
     }
 
     [[nodiscard]] __device__ uint32_t _AllocateNewChunkGpu() {
-        GpuSpinLock lock(_spin_lock);
-        lock.lock();
+        uint32_t idx{};
+        bool blocked = true;
 
-        uint32_t page_offset = _last_page_offset;
-        _last_page_offset += _thread_chunk_size_in_type;
-        if (page_offset == kPageSizeInTypeSize) {
-            /* we exhausted current page -> we need new one */
-            /* performed in lazy manner */
+        while (blocked) {
+            if (kSpinLockFree == atomicCAS(const_cast<uint32_t *>(&_spin_lock), kSpinLockFree, kSpinLockLocked)) {
+                printf("Locked...\n");
 
-            ++_last_page;
-            assert(_last_page < kMaxPages);
+                // ------------------------------
+                // Critical section
+                // ------------------------------
 
-            _pages[_last_page] = new Node_[kPageSizeInTypeSize];
+                uint32_t page_offset = _last_page_offset;
+                _last_page_offset += _thread_chunk_size_in_type;
+                if (page_offset == kPageSizeInTypeSize) {
+                    /* we exhausted current page -> we need new one */
+                    /* performed in lazy manner */
 
-            /* already offset for new chunk */
-            page_offset = 0;
-            _last_page_offset = _thread_chunk_size_in_type;
+                    ++_last_page;
+                    assert(_last_page < kMaxPages);
+
+                    _pages[_last_page] = new Node_[kPageSizeInTypeSize];
+
+                    /* already offset for new chunk */
+                    page_offset = 0;
+                    _last_page_offset = _thread_chunk_size_in_type;
+                }
+
+                assert(
+                    static_cast<uint64_t>(_last_page) * kPageSizeInTypeSize + static_cast<uint64_t>(page_offset) <= static_cast<
+                    uint64_t>(UINT32_MAX));
+                idx = _last_page * kPageSizeInTypeSize + page_offset;
+
+                // ------------------------------
+                // Critical section end
+                // ------------------------------
+
+                atomicExch(const_cast<uint32_t *>(&_spin_lock), kSpinLockFree);
+                blocked = false;
+                printf("Unlocked...\n");
+            }
         }
 
-        assert(
-            static_cast<uint64_t>(_last_page) * kPageSizeInTypeSize + static_cast<uint64_t>(page_offset) <= static_cast<
-            uint64_t>(UINT32_MAX));
-        const uint32_t idx = _last_page * kPageSizeInTypeSize + page_offset;
-        lock.unlock();
-
+        assert(idx != 0);
         assert(_last_page_offset <= kPageSizeInTypeSize);
         return idx;
+    }
+
+    [[nodiscard]] __device__ uint32_t _AllocateNewChunkGpu1() {
+        uint32_t idx{};
+        bool blocked = true;
+
+        while (blocked) {
+            if (kSpinLockFree == atomicCAS(const_cast<uint32_t *>(&_spin_lock), kSpinLockFree, kSpinLockLocked)) {
+                printf("Locked...\n");
+
+                // ------------------------------
+                // Critical section
+                // ------------------------------
+
+                uint32_t page_offset = _last_page_offset;
+                _last_page_offset += _thread_chunk_size_in_type;
+                if (page_offset == kPageSizeInTypeSize) {
+                    /* we exhausted current page -> we need new one */
+                    /* performed in lazy manner */
+
+                    ++_last_page;
+                    assert(_last_page < kMaxPages);
+
+                    _pages[_last_page] = new Node_[kPageSizeInTypeSize];
+
+                    /* already offset for new chunk */
+                    page_offset = 0;
+                    _last_page_offset = _thread_chunk_size_in_type;
+                }
+
+                assert(
+                    static_cast<uint64_t>(_last_page) * kPageSizeInTypeSize + static_cast<uint64_t>(page_offset) <= static_cast<
+                    uint64_t>(UINT32_MAX));
+                idx = _last_page * kPageSizeInTypeSize + page_offset;
+
+                // ------------------------------
+                // Critical section end
+                // ------------------------------
+
+                atomicExch(const_cast<uint32_t *>(&_spin_lock), kSpinLockFree);
+                blocked = false;
+                printf("Unlocked...\n");
+            }
+        }
+
+        assert(idx != 0);
+        assert(_last_page_offset <= kPageSizeInTypeSize);
+        return idx;
+    }
+
+    [[nodiscard]] FORCE_INLINE uint32_t _AllocateNodeCpu(const uint32_t t_idx) {
+        /* get current thread top */
+        uint32_t top = _thread_tops[t_idx]++;
+
+        /* check if we need new chunk - lazy allocation */
+        if (top == _thread_chunk_size_in_type) {
+            /* get new chunk */
+            _thread_bottoms[t_idx] = _AllocateNewChunkCpu();
+
+            /* already offset for new chunk */
+            top = 0;
+            _thread_tops[t_idx] = 1;
+        }
+
+        assert(_thread_tops[t_idx] <= _thread_chunk_size_in_type);
+        assert(_thread_bottoms[t_idx] + top != 0);
+        return _thread_bottoms[t_idx] + top;
+    }
+
+    [[nodiscard]] FAST_DCALL_ALWAYS uint32_t _AllocateNodeGpu(const uint32_t t_idx) {
+        /* get current thread top */
+        uint32_t top = _thread_tops[t_idx]++;
+
+        /* check if we need new chunk - lazy allocation */
+        if (top == _thread_chunk_size_in_type) {
+            /* get new chunk */
+            _thread_bottoms[t_idx] = _AllocateNewChunkGpu();
+
+            /* already offset for new chunk */
+            top = 0;
+            _thread_tops[t_idx] = 1;
+        }
+
+        assert(_thread_tops[t_idx] <= _thread_chunk_size_in_type);
+        assert(_thread_bottoms[t_idx] + top != 0);
+        return _thread_bottoms[t_idx] + top;
     }
 
     // ------------------------------

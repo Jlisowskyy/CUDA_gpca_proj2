@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.29)
-project(CudaEngine CUDA CXX)
+project(HammingOne CUDA CXX)
 
 set(CMAKE_CUDA_STANDARD 20)
 set(CMAKE_CXX_STANDARD 20)

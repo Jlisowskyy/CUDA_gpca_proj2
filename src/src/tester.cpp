@@ -266,8 +266,8 @@ void Tester::TestCpuTrieBuild_(const BinSequencePack &bin_sequence_pack) {
 void Tester::TestGPUTrieBuild_(const BinSequencePack &bin_sequence_pack) {
     std::cout << "Testing GPU trie build" << std::endl;
 
-    TestCUDATrieCpuBuild(bin_sequence_pack);
-    // TestCUDATrieGPUBuild(bin_sequence_pack);
+    // TestCUDATrieCpuBuild(bin_sequence_pack);
+    TestCUDATrieGPUBuild(bin_sequence_pack);
 }
 
 static void _splitBatchMultithreaded(const BinSequencePack &bin_sequence_pack) {
