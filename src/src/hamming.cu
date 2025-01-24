@@ -143,7 +143,7 @@ static std::tuple<cuda_Trie *, cuda_Data *, FastAllocator *> _buildOnDevice(
     cuda_Data *d_data = data.DumpToGPU();
 
     /* prepare allocator */
-    FastAllocator allocator(kGpuThreadChunkSize, mgr_data.max_threads);
+    FastAllocator allocator(kGpuThreadChunkSize, mgr_data.max_threads, true);
     FastAllocator *d_allocator = allocator.DumpToGPU();
 
     cuda_Trie *d_tries;
@@ -210,7 +210,7 @@ static std::tuple<cuda_Trie *, cuda_Data *, FastAllocator *> _buildOnHost(const 
     cuda_Data *d_data = data.DumpToGPU();
 
     /* Prepare cuda alloca */
-    FastAllocator cuda_allocator(kCpuThreadChunkSize, num_threads);
+    FastAllocator cuda_allocator(kCpuThreadChunkSize, num_threads, false);
 
     /* Prepare tries */
     std::vector<cuda_Trie> tries;

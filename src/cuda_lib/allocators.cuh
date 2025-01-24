@@ -19,6 +19,12 @@ static constexpr uint64_t kPageSizeInTypeSize = kPageSize / sizeof(Node_);
 static constexpr uint32_t kPageRemainder = kPageSizeInTypeSize - 1;
 static constexpr uint32_t kPageDivider = std::countr_zero(kPageSizeInTypeSize);
 
+inline __global__ void CleanupHeap(Node_ **pages, const uint32_t num_pages) {
+    for (uint32_t page_idx = 0; page_idx < num_pages; ++page_idx) {
+        free(pages[page_idx]);
+    }
+}
+
 class FastAllocator {
     // ------------------------------
     // inner constants
@@ -32,9 +38,10 @@ public:
     // Type creation
     // ------------------------------
 
-    FastAllocator(const size_t thread_chunk_size, const size_t num_threads) : _thread_chunk_size_in_type(
-                                                                                  thread_chunk_size / sizeof(Node_)),
-                                                                              _num_threads(num_threads) {
+    FastAllocator(const size_t thread_chunk_size, const size_t num_threads,
+                  const bool isCudaAlloc) : _thread_chunk_size_in_type(
+                                                thread_chunk_size / sizeof(Node_)), _num_threads(num_threads),
+                                            _is_cuda_alloc(isCudaAlloc) {
         /* verify provided data */
         assert(num_threads * thread_chunk_size < kPageSize);
         assert(thread_chunk_size % sizeof(Node_) == 0);
@@ -46,7 +53,7 @@ public:
         _thread_bottoms = new uint32_t[num_threads];
 
         /* preallocate first page */
-        _pages[0] = new Node_[kPageSizeInTypeSize];
+        _pages[0] = static_cast<Node_ *>(malloc(sizeof(Node_) * kPageSizeInTypeSize));
 
         /* set thread bottoms */
         for (uint32_t thread_idx = 0; thread_idx < num_threads; ++thread_idx) {
@@ -116,7 +123,7 @@ public:
 
     void DeallocHost() {
         for (uint32_t page_idx = 0; page_idx <= _last_page; ++page_idx) {
-            delete[] _pages[page_idx];
+            free(_pages[page_idx]);
         }
 
         delete[] _pages;
@@ -216,11 +223,25 @@ public:
                 g_cudaGlobalConf->asyncStream));
 
         /* delete individual pages */
-        for (uint32_t page_idx = 0; page_idx < kMaxPages; ++page_idx) {
-            if (h_pages[page_idx] != nullptr) {
-                CUDA_ASSERT_SUCCESS(cudaFreeAsync(h_pages[page_idx], g_cudaGlobalConf->asyncStream));
+        CUDA_ASSERT_SUCCESS(cudaFreeAsync(h_pages[0], g_cudaGlobalConf->asyncStream));
+
+        bool is_cuda_alloc;
+        CUDA_ASSERT_SUCCESS(
+            cudaMemcpyAsync(&is_cuda_alloc, &allocator->_is_cuda_alloc, sizeof(bool), cudaMemcpyDeviceToHost,
+                g_cudaGlobalConf->asyncStream));
+
+        if (is_cuda_alloc) {
+            /* cleanup heap */
+            CleanupHeap<<<1, 1, 0, g_cudaGlobalConf->asyncStream>>>(d_pages + 1, kMaxPages - 1);
+
+        } else {
+            for (uint32_t page_idx = 1; page_idx < kMaxPages; ++page_idx) {
+                if (h_pages[page_idx] != nullptr) {
+                    CUDA_ASSERT_SUCCESS(cudaFreeAsync(h_pages[page_idx], g_cudaGlobalConf->asyncStream));
+                }
             }
         }
+
 
         /* free page table */
         CUDA_ASSERT_SUCCESS(cudaFreeAsync(d_pages, g_cudaGlobalConf->asyncStream));
@@ -274,7 +295,7 @@ protected:
             assert(_last_page == prev_page);
 
             /* allocate new page */
-            const auto page = new Node_[kPageSizeInTypeSize];
+            const auto page = static_cast<Node_ *>(malloc(sizeof(Node_) * kPageSizeInTypeSize));
             assert(page != nullptr);
             assert(_last_page == prev_page);
             assert(_pages[cur_page] == nullptr);
@@ -310,7 +331,7 @@ protected:
             assert(_last_page == prev_page);
 
             /* allocate new page */
-            const auto page = new Node_[kPageSizeInTypeSize];
+            const auto page = static_cast<Node_ *>(malloc(sizeof(Node_) * kPageSizeInTypeSize));
             assert(page != nullptr);
             assert(_last_page == prev_page);
             assert(_pages[cur_page] == nullptr);
@@ -337,6 +358,7 @@ protected:
     /* general data */
     volatile uint32_t _thread_chunk_size_in_type{};
     uint32_t _num_threads{};
+    bool _is_cuda_alloc{};
 
     /* thread data */
     uint32_t *_thread_tops{};
