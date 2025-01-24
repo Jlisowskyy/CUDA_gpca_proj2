@@ -11,15 +11,15 @@ void cuda_InitGlobalConf() {
 
     CUDA_ASSERT_SUCCESS(cudaStreamCreate(&g_cudaGlobalConf->asyncStream));
 
-    /* query free memory */
-    size_t free, total;
-    CUDA_ASSERT_SUCCESS(cudaMemGetInfo(&free, &total));
-
-    /* set heap size to 80% of free memory */
-    const size_t heap_size = std::max(static_cast<size_t>(0), (8 * free / 10) - kPageSize);
-    CUDA_ASSERT_SUCCESS(cudaDeviceSetLimit(cudaLimitMallocHeapSize, heap_size));
-
-    std::cout << "Set CUDA heap size to " << heap_size << " bytes, MB: " << heap_size / 1024 / 1024 << std::endl;
+    // /* query free memory */
+    // size_t free, total;
+    // CUDA_ASSERT_SUCCESS(cudaMemGetInfo(&free, &total));
+    //
+    // /* set heap size to 80% of free memory */
+    // const size_t heap_size = std::max(static_cast<size_t>(0), (8 * free / 10) - kPageSize);
+    // CUDA_ASSERT_SUCCESS(cudaDeviceSetLimit(cudaLimitMallocHeapSize, heap_size));
+    //
+    // std::cout << "Set CUDA heap size to " << heap_size << " bytes, MB: " << heap_size / 1024 / 1024 << std::endl;
 }
 
 void cuda_DestroyGlobalConf() {
