@@ -26,7 +26,6 @@ static std::vector<std::tuple<uint32_t, uint32_t> > Hamming1Distance(cuda_Trie *
 // Kernels
 // ------------------------------
 
-// TODO: Does not work due to allocator deadlock
 __global__ void BuildTrieKernel(cuda_Trie *out_tries,
                                 const uint32_t *buckets,
                                 const uint32_t *bucket_sizes,
@@ -56,27 +55,24 @@ __global__ void BuildTrieKernel(cuda_Trie *out_tries,
     /* wait for all threads to finish */
     __syncthreads();
 
-    // /* start merging by logarithmic reduction */
-    // uint32_t other_thread_idx = thread_idx;
-    // for (auto bit_pos = static_cast<int32_t>(prefix_len - 1); bit_pos >= 0; --bit_pos) {
-    //     const uint32_t mask = static_cast<uint32_t>(1) << bit_pos;
-    //
-    //     if ((thread_idx & mask) != 0) {
-    //         /* only threads with 0 on given position will merge */
-    //         return;
-    //     }
-    //
-    //     /* remove next bit */
-    //     other_thread_idx &= ~mask;
-    //
-    //     /* take the other trie */
-    //     cuda_Trie &other_trie = out_tries[other_thread_idx | mask];
-    //
-    //     my_trie.MergeWithOther<true>(thread_idx, other_trie, *allocator);
-    //
-    //     /* wait for other thread to finish */
-    //     __syncthreads();
-    // }
+    /* start merging by logarithmic reduction */
+    uint32_t other_thread_idx = thread_idx;
+    for (auto bit_pos = static_cast<int32_t>(prefix_len - 1); bit_pos >= 0; --bit_pos) {
+        const uint32_t mask = static_cast<uint32_t>(1) << bit_pos;
+
+        if ((thread_idx & mask) != 0) {
+            /* only threads with 0 on given position will merge */
+            return;
+        }
+        
+        /* take the other trie */
+        cuda_Trie &other_trie = out_tries[other_thread_idx | mask];
+
+        my_trie.MergeWithOther<true>(thread_idx, other_trie, *allocator);
+
+        /* wait for other thread to finish */
+        __syncthreads();
+    }
 }
 
 __global__ void FindAllHamming1Pairs(const cuda_Trie *out_trie, const FastAllocator *alloca, const cuda_Data *data,
@@ -118,7 +114,9 @@ static void _testTrie(const size_t num_seq, cuda_Trie *d_trie, cuda_Data *d_data
     for (size_t idx = 0; idx < num_seq; ++idx) {
         num_failed += !h_result[idx];
         if (!h_result[idx]) {
-            std::cerr << "Failed to find sequence " << idx << std::endl;
+            if (GlobalConfig.Verbose) {
+                std::cerr << "Failed to find sequence " << idx << std::endl;
+            }
         }
     }
 

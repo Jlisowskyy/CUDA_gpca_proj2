@@ -40,7 +40,7 @@ static constexpr uint32_t GenMask(const uint32_t size) {
 // Constants
 // ------------------------------
 
-static constexpr uint32_t kPrefixSize = 15;
+static constexpr uint32_t kPrefixSize = 8;
 
 // ------------------------------
 // Implementations
@@ -49,7 +49,7 @@ static constexpr uint32_t kPrefixSize = 15;
 MgrTrieBuildData ThreadMgr::PrepareTrieBuildData(const BinSequencePack &pack, bool enforce_gpu_build) const {
     /* TODO: adjust */
     static constexpr uint32_t kMaxThreads = pow2(kPrefixSize);
-    static constexpr uint32_t kNumThreadsPerBlock = 32;
+    static constexpr uint32_t kNumThreadsPerBlock = 256;
 
     MgrTrieBuildData data{};
 
