@@ -16,5 +16,12 @@ bool TraceError(cudaError_t error, const char *file, int line);
 
 #define FAST_DCALL_ALWAYS __forceinline__ __device__
 
+template<typename T>
+static constexpr bool IsPowerOfTwo(T x) {
+    if (x < 0) { return false; }
+
+    return x && (!(x & (x - 1)));
+}
+
 
 #endif //DEFINES_CUH
