@@ -16,15 +16,24 @@ const char *Generator::GeneratorNames[kMaxNumGenerators]{
     "random_gen",
     "ensure_sol",
     "fixed",
+    "ensure_sol_defaults",
 };
 
 Generator::GeneratorFuncT Generator::GeneratorFuncs[kMaxNumGenerators]{
     &Generator::GenerateRandomData,
     &Generator::GenerateEnsureSolution,
-    &Generator::GeneratedFixed,
+    &Generator::_GeneratedFixed,
+    &Generator::_GenerateEnsureSolutionDefaults,
 };
 
-size_t Generator::NumGenerators = 3;
+const char *Generator::GeneratorDesc[kMaxNumGenerators]{
+    "Generates random binary sequences of varying lengths",
+    "Generates sequences with guaranteed minimum number of solution pairs",
+    "Returns a fixed set of predefined binary sequences",
+    "Generates sequences with 10000 solution pairs using minimum parameters",
+};
+
+size_t Generator::NumGenerators = 4;
 
 BinSequencePack Generator::GenerateData(const char *generator_name) {
     for (size_t idx = 0; idx < NumGenerators; ++idx) {
@@ -51,6 +60,16 @@ std::vector<std::string> Generator::GetGeneratorNames() {
 
     for (size_t idx = 0; idx < NumGenerators; ++idx) {
         out.emplace_back(GeneratorNames[idx]);
+    }
+
+    return out;
+}
+
+std::vector<std::string> Generator::GetGeneratorDesc() {
+    std::vector<std::string> out{};
+
+    for (size_t idx = 0; idx < NumGenerators; ++idx) {
+        out.emplace_back(GeneratorDesc[idx]);
     }
 
     return out;
@@ -86,7 +105,10 @@ Generator::GeneratorParams Generator::GetGeneratorParams() {
 
 BinSequencePack Generator::GenerateRandomData() {
     const auto params = GetGeneratorParams();
+    return GenerateRandomData(params);
+}
 
+BinSequencePack Generator::GenerateRandomData(const GeneratorParams &params) {
     BinSequencePack out{};
     out.sequences.reserve(params.num_sequences);
 
@@ -125,11 +147,17 @@ BinSequencePack Generator::GenerateRandomData() {
 }
 
 BinSequencePack Generator::GenerateEnsureSolution() {
-    auto data = GenerateRandomData();
-
     std::cout << "Provide minimal number of solutions to generate: " << std::endl;
     size_t min_solutions;
     std::cin >> min_solutions;
+
+    const auto params = GetGeneratorParams();
+
+    return _GenerateEnsureSolution(min_solutions, params);
+}
+
+BinSequencePack Generator::_GenerateEnsureSolution(size_t min_solutions, const GeneratorParams &params) {
+    auto data = GenerateRandomData(params);
 
     std::set<size_t> used{};
     std::mt19937_64 gen(std::random_device{}());
@@ -163,7 +191,16 @@ BinSequencePack Generator::GenerateEnsureSolution() {
     return data;
 }
 
-BinSequencePack Generator::GeneratedFixed() {
+BinSequencePack Generator::_GenerateEnsureSolutionDefaults() {
+    GeneratorParams params;
+    params.min_length = kMinSequenceLength;
+    params.max_length = kMinSequenceLength;
+    params.num_sequences = kMinNumSequences;
+
+    return _GenerateEnsureSolution(10000, params);
+}
+
+BinSequencePack Generator::_GeneratedFixed() {
     static constexpr const char *kFixedSequence[]{
         "1000111110",
         "1100111110",

@@ -48,14 +48,25 @@ void ArgParser::PrintHelp() {
             "- \"-v\" enables verbose mode\n"
             "- \"-d\" enables writing DOT files for displaying TRIEs\n\n";
 
+    const auto test_names = Tester::GetTestNames();
+    const auto test_descs = Tester::GetTestDescriptions();
+
     std::cout << "Available tests:\n";
-    for (const auto test_names = Tester::GetTestNames(); const auto &test_name: test_names) {
-        std::cout << "- \"" << test_name << "\"\n";
+    for (size_t test_idx = 0; test_idx < test_names.size(); ++test_idx) {
+        const auto& test_name = test_names[test_idx];
+        const auto& test_desc = test_descs[test_idx];
+
+        std::cout << "- \"" << test_name << "\" === " <<  test_desc << '\n';
     }
 
     std::cout << "\nAvailable generators:\n";
-    for (const auto generator_names = Generator::GetGeneratorNames(); const auto &generator_name: generator_names) {
-        std::cout << "- \"" << generator_name << "\"\n";
+    const auto generator_names = Generator::GetGeneratorNames();
+    const auto generator_descs = Generator::GetGeneratorDesc();
+    for (size_t gen_idx = 0; gen_idx < generator_names.size(); ++gen_idx) {
+        const auto& generator_name = generator_names[gen_idx];
+        const auto& generator_desc = generator_descs[gen_idx];
+
+        std::cout << "- \"" << generator_name << "\"" << " === " << generator_desc << '\n';
     }
 
     std::cout.flush();

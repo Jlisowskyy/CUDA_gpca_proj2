@@ -29,6 +29,8 @@ public:
 
     static std::vector<std::string> GetTestNames();
 
+    static std::vector<std::string> GetTestDescriptions();
+
     // ------------------------------
     // Protected methods
     // ------------------------------
@@ -85,6 +87,7 @@ protected:
 
     static const char *TestNames[kMaxNumTests];
     static TestFuncT TestFuncs[kMaxNumTests];
+    static const char* TestDescriptions[kMaxNumTests];
     static size_t NumTests;
 };
 

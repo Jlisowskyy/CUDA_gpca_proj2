@@ -47,6 +47,20 @@ Tester::TestFuncT Tester::TestFuncs[kMaxNumTests]{
     &Tester::TestBatchSplit_,
 };
 
+const char* Tester::TestDescriptions[kMaxNumTests] {
+    "Single-threaded naive implementation comparing all sequence pairs sequentially",
+    "Multi-threaded naive implementation comparing sequences in parallel",
+    "Single-threaded implementation using trie data structure for faster matching",
+    "Multi-threaded implementation using trie data structure with parallel processing",
+    "GPU implementation for parallel sequence comparison using CUDA",
+    "Performance test comparing single vs multi-threaded malloc operations",
+    "Performance test comparing custom allocator in single vs multi-threaded scenarios",
+    "Verification of CUDA special data storage for the sequences correctness",
+    "Verifies if all sequences are found in the trie structure (CPU)",
+    "Verifies if all sequences are found in the trie structure (GPU layout test when built both on CPU and GPU)",
+    "Performance test of sequence batch splitting methods (single vs multi-threaded)"
+};
+
 size_t Tester::NumTests = 11;
 
 void Tester::RunTests(const std::vector<const char *> &test_names, const BinSequencePack &bin_sequence_pack) {
@@ -62,6 +76,16 @@ std::vector<std::string> Tester::GetTestNames() {
 
     for (size_t idx = 0; idx < NumTests; ++idx) {
         out.emplace_back(TestNames[idx]);
+    }
+
+    return out;
+}
+
+std::vector<std::string> Tester::GetTestDescriptions() {
+    std::vector<std::string> out{};
+
+    for (size_t idx = 0; idx < NumTests; ++idx) {
+        out.emplace_back(TestDescriptions[idx]);
     }
 
     return out;

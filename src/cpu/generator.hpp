@@ -33,6 +33,8 @@ public:
 
     [[nodiscard]] static std::vector<std::string> GetGeneratorNames();
 
+    [[nodiscard]] static std::vector<std::string> GetGeneratorDesc();
+
     // ------------------------------
     // Protected methods
     // ------------------------------
@@ -42,9 +44,15 @@ protected:
 
     [[nodiscard]] BinSequencePack GenerateRandomData();
 
+    [[nodiscard]] BinSequencePack GenerateRandomData(const GeneratorParams& params);
+
     [[nodiscard]] BinSequencePack GenerateEnsureSolution();
 
-    [[nodiscard]] BinSequencePack GeneratedFixed();
+    [[nodiscard]] BinSequencePack _GenerateEnsureSolution(size_t min_solutions, const GeneratorParams& params);
+
+    [[nodiscard]] BinSequencePack _GenerateEnsureSolutionDefaults();
+
+    [[nodiscard]] BinSequencePack _GeneratedFixed();
 
     // ------------------------------
     // class fields
@@ -54,6 +62,7 @@ protected:
 
     static const char *GeneratorNames[kMaxNumGenerators];
     static GeneratorFuncT GeneratorFuncs[kMaxNumGenerators];
+    static const char* GeneratorDesc[kMaxNumGenerators];
     static size_t NumGenerators;
 };
 
