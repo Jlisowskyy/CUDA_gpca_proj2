@@ -13,11 +13,13 @@
 // Naive solution
 // ------------------------------
 
-void CalculateHammingDistancesSingleThreadNaive(const std::vector<BinSequence> &sequences,
-                                                const size_t offset,
-                                                std::vector<std::pair<size_t, size_t> > &out) {
+std::vector<std::pair<size_t, size_t> > CalculateHammingDistancesSingleThreadNaive(
+    const std::vector<BinSequence> &sequences,
+    const size_t offset,
+    std::vector<std::pair<size_t, size_t> > &out) {
     const auto &sequence = sequences[offset];
-// 50524
+    std::vector<std::pair<size_t, size_t> > reps{};
+
     for (size_t idx = offset + 1; idx < sequences.size(); ++idx) {
         const auto &other_sequence = sequences[idx];
         size_t distance = std::abs(
@@ -41,29 +43,51 @@ void CalculateHammingDistancesSingleThreadNaive(const std::vector<BinSequence> &
         if (distance == 1) {
             out.emplace_back(idx, offset);
         }
+
+        if (distance == 0) {
+            reps.emplace_back(idx, offset);
+        }
     }
+
+    return reps;
 }
 
 void CalculateHammingDistancesNaive(const std::vector<BinSequence> &sequences,
                                     std::vector<std::pair<size_t, size_t> > &out) {
     ThreadPool thread_pool(std::thread::hardware_concurrency());
 
+    std::vector<std::vector<size_t> > repeats(sequences.size());
+
     std::mutex m{};
-    thread_pool.RunThreads([&sequences, &out, &m](const uint32_t idx) {
+    thread_pool.RunThreads([&](const uint32_t idx) {
         const size_t num_threads = std::thread::hardware_concurrency();
         std::vector<std::pair<size_t, size_t> > pairs{};
+        std::vector<std::pair<size_t, size_t> > repeat_pairs{};
+
 
         for (size_t seq_idx = idx; seq_idx < sequences.size(); seq_idx += num_threads) {
-            CalculateHammingDistancesSingleThreadNaive(sequences, seq_idx, pairs);
+            const auto reps = CalculateHammingDistancesSingleThreadNaive(sequences, seq_idx, pairs);
+
+            for (const auto &rep: reps) {
+                repeat_pairs.push_back(rep);
+            }
         }
 
         m.lock();
         for (const auto &pair: pairs) {
             out.emplace_back(pair);
         }
+
+        for (const auto &[l, r]: repeat_pairs) {
+            repeats[l].push_back(r);
+            repeats[r].push_back(l);
+        }
+
         m.unlock();
     });
     thread_pool.Wait();
+
+    FilterOutRepeats(repeats, out);
 }
 
 // ------------------------------
@@ -124,4 +148,41 @@ void CalculateHammingDistancesTrie(const std::vector<BinSequence> &sequences,
         std::milli>(build_end - build_start).count() << "ms" << std::endl;
     std::cout << "Total time spent on finding pairs: " << std::chrono::duration<double,
         std::milli>(find_end - find_start).count() << "ms" << std::endl;
+}
+
+void FilterOutRepeats(const std::vector<std::vector<size_t> > &repeats,
+                      std::vector<std::pair<size_t, size_t> > &results) {
+    std::vector<std::pair<size_t, size_t> > final_results{};
+    std::vector<int8_t> should_be_removed(repeats.size(), 0);
+
+    for (size_t idx = 0; idx < repeats.size(); ++idx) {
+        const auto &reps = repeats[idx];
+
+        if (reps.empty()) {
+            should_be_removed[idx] = -1;
+            continue;
+        }
+
+        if (should_be_removed[idx] == 1) {
+            continue;
+        }
+
+        for (const auto &rep: reps) {
+            should_be_removed[rep] = 1;
+        }
+        should_be_removed[idx] = -1;
+    }
+
+    while (!results.empty()) {
+        const auto [l, r] = results.back();
+        results.pop_back();
+
+        if (should_be_removed[l] == 1 || should_be_removed[r] == 1) {
+            continue;
+        }
+
+        final_results.emplace_back(l, r);
+    }
+
+    results = std::move(final_results);
 }

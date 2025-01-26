@@ -12,6 +12,7 @@ void cuda_InitGlobalConf() {
     CUDA_ASSERT_SUCCESS(cudaStreamCreate(&g_cudaGlobalConf->asyncStream));
 
     // /* query free memory */
+
     // size_t free, total;
     // CUDA_ASSERT_SUCCESS(cudaMemGetInfo(&free, &total));
     //

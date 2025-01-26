@@ -74,7 +74,16 @@ void Tester::TestCpuSingleNaive_(const BinSequencePack &bin_sequence_pack) {
         bin_sequence_pack,
         [](const BinSequencePack &bin_sequence_pack, std::vector<std::pair<size_t, size_t> > &out) {
             for (size_t idx = 0; idx < bin_sequence_pack.sequences.size(); ++idx) {
-                CalculateHammingDistancesSingleThreadNaive(bin_sequence_pack.sequences, idx, out);
+                const auto reps = CalculateHammingDistancesSingleThreadNaive(bin_sequence_pack.sequences, idx, out);
+
+                std::vector<std::vector<size_t> > repeats(bin_sequence_pack.sequences.size());
+
+                for (const auto &[l, r]: reps) {
+                    repeats[l].push_back(r);
+                    repeats[r].push_back(l);
+                }
+
+                FilterOutRepeats(repeats, out);
             }
         }
     );
