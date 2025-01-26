@@ -157,35 +157,18 @@ BinSequencePack Generator::GenerateEnsureSolution() {
 }
 
 BinSequencePack Generator::_GenerateEnsureSolution(size_t min_solutions, const GeneratorParams &params) {
+    auto p = params;
+    p.num_sequences = params.num_sequences - min_solutions;
     auto data = GenerateRandomData(params);
 
-    std::set<size_t> used{};
     std::mt19937_64 gen(std::random_device{}());
 
-    while (min_solutions > 0) {
-        size_t left = gen() % data.sequences.size();
-        const size_t right = gen() % data.sequences.size();
+    while (min_solutions -- > 0) {
+        const size_t seq_idx = gen() % data.sequences.size();
+        auto &sequence = data.sequences.emplace_back(data.sequences[seq_idx]);
 
-        if (left == right) {
-            continue;
-        }
-
-        if (used.contains(left) && used.contains(right)) {
-            continue;
-        }
-
-        if (used.contains(left) || used.contains(right)) {
-            left = used.contains(left) ? right : left;
-        }
-
-        used.insert(left);
-        used.insert(right);
-        --min_solutions;
-
-        data.sequences[left] = data.sequences[right];
-
-        const size_t random_bit = gen() % data.sequences[left].GetSizeBits();
-        data.sequences[left].SetBit(random_bit, !data.sequences[left].GetBit(random_bit));
+        const size_t random_bit = gen() % sequence.GetSizeBits();
+        sequence.SetBit(random_bit, !sequence.GetBit(random_bit));
     }
 
     return data;
