@@ -157,20 +157,7 @@ public:
     // Constructors
     // ------------------------------
 
-    explicit cuda_Data(const uint32_t num_sequences,
-                       const uint32_t max_sequence_length)
-        : _num_sequences(num_sequences),
-          _num_sequences_padded32(
-              num_sequences + (32 - (num_sequences % 32)) % 32),
-          _max_sequence_length(max_sequence_length) {
-        _data = new uint32_t[_num_sequences_padded32 * (_max_sequence_length + 1)];
-
-        std::cout << "Num sequences: " << _num_sequences << std::endl;
-        std::cout << "Num sequences padded: " << _num_sequences_padded32 << std::endl;
-
-        size_t total_mem_used = _num_sequences_padded32 * (_max_sequence_length + 1) * sizeof(uint32_t);
-        std::cout << "Allocated " << total_mem_used / (1024 * 1024) << " mega bytes for sequences" << std::endl;
-    }
+    explicit cuda_Data(uint32_t num_sequences, uint32_t max_sequence_length);
 
     explicit cuda_Data(const BinSequencePack &pack);
 

@@ -25,7 +25,10 @@ inline __global__ void CleanupHeap(Node_ **pages, const uint32_t num_pages) {
     }
 }
 
-class FastAllocator {
+
+
+template<class T>
+class BaseFastAllocator_ {
     // ------------------------------
     // inner constants
     // ------------------------------
@@ -38,7 +41,7 @@ public:
     // Type creation
     // ------------------------------
 
-    FastAllocator(const size_t thread_chunk_size, const size_t num_threads,
+    BaseFastAllocator_(const size_t thread_chunk_size, const size_t num_threads,
                   const bool isCudaAlloc) : _thread_chunk_size_in_type(
                                                 thread_chunk_size / sizeof(Node_)), _num_threads(num_threads),
                                             _is_cuda_alloc(isCudaAlloc) {
@@ -135,10 +138,10 @@ public:
         _thread_bottoms = nullptr;
     }
 
-    [[nodiscard]] FastAllocator *DumpToGPU() const {
+    [[nodiscard]] BaseFastAllocator_ *DumpToGPU() const {
         /* allocate the object itself */
-        FastAllocator *d_allocator;
-        CUDA_ASSERT_SUCCESS(cudaMallocAsync(&d_allocator, sizeof(FastAllocator), g_cudaGlobalConf->asyncStream));
+        BaseFastAllocator_ *d_allocator;
+        CUDA_ASSERT_SUCCESS(cudaMallocAsync(&d_allocator, sizeof(BaseFastAllocator_), g_cudaGlobalConf->asyncStream));
 
         /* allocate thread tops */
         uint32_t *d_thread_tops;
@@ -164,7 +167,7 @@ public:
 
         /* copy allocator object */
         CUDA_ASSERT_SUCCESS(
-            cudaMemcpyAsync(d_allocator, this, sizeof(FastAllocator), cudaMemcpyHostToDevice, g_cudaGlobalConf->
+            cudaMemcpyAsync(d_allocator, this, sizeof(BaseFastAllocator_), cudaMemcpyHostToDevice, g_cudaGlobalConf->
                 asyncStream));
 
         /* copy thread tops */
@@ -207,7 +210,7 @@ public:
         return d_allocator;
     }
 
-    static void DeallocGPU(FastAllocator *allocator) {
+    static void DeallocGPU(BaseFastAllocator_ *allocator) {
         /* prepare host page table */
         auto h_pages = new Node_ *[kMaxPages]{};
 
@@ -369,5 +372,7 @@ protected:
     volatile uint32_t _last_page{};
     volatile uint32_t _last_page_offset{};
 };
+
+using FastAllocator = BaseFastAllocator_<Node_>;
 
 #endif //ALLOCATORS_CUH
