@@ -25,11 +25,6 @@ MgrTrieBuildData ThreadMgr::PrepareTrieBuildData(const BinSequencePack &pack, co
     data.max_threads = kMaxThreadsBuild;
     data.max_nodes_per_thread = pack.max_seq_size_bits;
 
-    /* fill trie kernel management */
-    data.num_threads_per_block = kNumThreadsPerBlockBuild;
-    data.num_blocks = data.max_threads / data.num_threads_per_block;
-    assert(data.num_blocks <= 1024 && "Too many blocks");
-
     const auto t_bucket_start = std::chrono::high_resolution_clock::now();
     _prepareBuckets(pack, data, enforce_gpu_build);
     const auto t_bucket_end = std::chrono::high_resolution_clock::now();

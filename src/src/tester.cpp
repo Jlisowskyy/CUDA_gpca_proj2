@@ -47,7 +47,7 @@ Tester::TestFuncT Tester::TestFuncs[kMaxNumTests]{
     &Tester::TestBatchSplit_,
 };
 
-const char* Tester::TestDescriptions[kMaxNumTests] {
+const char *Tester::TestDescriptions[kMaxNumTests]{
     "Single-threaded naive implementation comparing all sequence pairs sequentially",
     "Multi-threaded naive implementation comparing sequences in parallel",
     "Single-threaded implementation using trie data structure for faster matching",
@@ -299,7 +299,8 @@ void Tester::TestCpuTrieBuild_(const BinSequencePack &bin_sequence_pack) {
 void Tester::TestGPUTrieBuild_(const BinSequencePack &bin_sequence_pack) {
     std::cout << "Testing GPU trie build" << std::endl;
 
-    // TestCUDATrieCpuBuild(bin_sequence_pack);
+    TestCUDATrieCpuBuild(bin_sequence_pack);
+    std::cout << std::string(80, '=') << std::endl;
     TestCUDATrieGPUBuild(bin_sequence_pack);
 }
 

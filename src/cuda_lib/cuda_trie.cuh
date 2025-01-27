@@ -207,6 +207,10 @@ public:
         const uint32_t root0 = _root_idx;
         const uint32_t root1 = other._root_idx;
 
+        if (root0 == 0 && root1 == 0) {
+            return;
+        }
+
         _root_idx = AllocateNode<isGpu>(allocator, thread_idx);
         allocator[_root_idx].next[0] = root0;
         allocator[_root_idx].next[1] = root1;

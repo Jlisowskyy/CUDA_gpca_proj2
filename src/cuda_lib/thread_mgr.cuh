@@ -22,6 +22,11 @@ static constexpr uint32_t kLog2NumBlocksBuild = std::countr_zero(kNumBlocksBuild
 static constexpr uint32_t kThreadsPerBlockSearch = 512;
 static constexpr uint32_t kMaxBlocksSearch = 128;
 
+static_assert(kNumThreadsPerBlockBuild <= 1024);
+static_assert(kNumBlocksBuild <= 1024);
+static_assert(kThreadsPerBlockSearch <= 1024);
+static_assert(kMaxBlocksSearch <= 1024);
+
 // ------------------------------
 // Protocol layout
 // ------------------------------
@@ -31,10 +36,6 @@ struct MgrTrieBuildData {
     uint32_t max_nodes{};
     uint32_t max_threads{};
     uint32_t max_nodes_per_thread{};
-
-    /* trie kernel management */
-    uint32_t num_blocks{};
-    uint32_t num_threads_per_block{};
 
     /* bucket building management */
     uint32_t *d_buckets{};

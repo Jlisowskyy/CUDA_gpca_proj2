@@ -185,7 +185,7 @@ static std::tuple<cuda_Trie *, cuda_Data *, FastAllocator *> _buildOnDevice(
     CUDA_ASSERT_SUCCESS(cudaGetLastError());
     CUDA_ASSERT_SUCCESS(cudaStreamSynchronize(g_cudaGlobalConf->asyncStream));
 
-    MergeBlockResults<<<1, mgr_data.num_blocks, 0, g_cudaGlobalConf->asyncStream>>>(d_tries, mgr_data.bucket_prefix_len,
+    MergeBlockResults<<<1,kNumBlocksBuild, 0, g_cudaGlobalConf->asyncStream>>>(d_tries, mgr_data.bucket_prefix_len,
         d_allocator);
     CUDA_ASSERT_SUCCESS(cudaGetLastError());
 
