@@ -29,7 +29,6 @@ __global__ void MergeBlockResults(cuda_Trie *out_tries, const uint32_t prefix_le
     cuda_Trie &my_trie = out_tries[trie_idx];
 
     /* start merging by logarithmic reduction (INSIDE THE BLOCK) */
-    const uint32_t other_thread_idx = trie_idx;
     for (auto bit_pos = prefix_len - 1; bit_pos >= kLog2NumThreadsPerBlockBuild; --bit_pos) {
         const uint32_t mask = static_cast<uint32_t>(1) << bit_pos;
 
@@ -39,7 +38,7 @@ __global__ void MergeBlockResults(cuda_Trie *out_tries, const uint32_t prefix_le
         }
 
         /* take the other trie */
-        cuda_Trie &other_trie = out_tries[other_thread_idx | mask];
+        cuda_Trie &other_trie = out_tries[trie_idx | mask];
         my_trie.MergeWithOther<true>(trie_idx, other_trie, *allocator);
 
         /* wait for other thread to finish */
@@ -47,14 +46,21 @@ __global__ void MergeBlockResults(cuda_Trie *out_tries, const uint32_t prefix_le
     }
 }
 
+/***
+ * @note Implementation not finished as initial performance tests showed that improvement is not significant
+ */
 __global__ void BuildTrieKernel(cuda_Trie *out_tries,
                                 const uint32_t *buckets,
                                 const uint32_t *bucket_sizes,
                                 const uint32_t prefix_len,
                                 const cuda_Data *data,
                                 FastAllocator *allocator) {
+    const uint32_t block_range_start = blockIdx.x * blockDim.x;
+    const uint32_t block_range_end = block_range_start + blockDim.x;
+
     const uint32_t num_threads = gridDim.x * blockDim.x;
     const uint32_t thread_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    assert(thread_idx < block_range_end && thread_idx >= block_range_start);
 
     /* load own data */
     cuda_Trie &my_trie = out_tries[thread_idx];
@@ -75,7 +81,6 @@ __global__ void BuildTrieKernel(cuda_Trie *out_tries,
     __syncthreads();
 
     /* start merging by logarithmic reduction (INSIDE THE BLOCK) */
-    const uint32_t other_thread_idx = thread_idx;
     for (int32_t bit_pos = kLog2NumThreadsPerBlockBuild - 1; bit_pos >= 0; --bit_pos) {
         const uint32_t mask = static_cast<uint32_t>(1) << bit_pos;
 
@@ -85,7 +90,9 @@ __global__ void BuildTrieKernel(cuda_Trie *out_tries,
         }
 
         /* take the other trie */
-        cuda_Trie &other_trie = out_tries[other_thread_idx | mask];
+        assert((thread_idx | mask) < block_range_end && (thread_idx | mask) >= block_range_start);
+
+        cuda_Trie &other_trie = out_tries[thread_idx | mask];
         my_trie.MergeWithOther<true>(thread_idx, other_trie, *allocator);
 
         /* wait for other thread to finish */
@@ -105,11 +112,17 @@ __global__ void FindAllHamming1Pairs(const cuda_Trie *out_trie, const FastAlloca
 }
 
 __global__ void TestTrieBuild(const cuda_Trie *trie, const cuda_Data *data, const FastAllocator *alloca,
-                              bool *result) {
+                              bool *result, int32_t prefix) {
     const uint32_t thread_idx = blockIdx.x * blockDim.x + threadIdx.x;
     const uint32_t num_threads = gridDim.x * blockDim.x;
 
     for (uint32_t idx = thread_idx; idx < data->GetNumSequences(); idx += num_threads) {
+        if (prefix != -1 && ((*data)[idx].GetWord(0) & static_cast<uint32_t>(prefix)) != static_cast<uint32_t>(
+                prefix)) {
+            result[idx] = true;
+            continue;
+        }
+
         result[idx] = trie->Search(*alloca, idx, *data);
     }
 }
@@ -118,10 +131,11 @@ __global__ void TestTrieBuild(const cuda_Trie *trie, const cuda_Data *data, cons
 // Static functions
 // ------------------------------
 
-static void _testTrie(const size_t num_seq, cuda_Trie *d_trie, cuda_Data *d_data, FastAllocator *d_alloca) {
+static void _testTrie(const size_t num_seq, cuda_Trie *d_trie, cuda_Data *d_data, FastAllocator *d_alloca,
+                      const int32_t prefix) {
     bool *d_result;
     CUDA_ASSERT_SUCCESS(cudaMalloc(&d_result, sizeof(bool) * num_seq));
-    TestTrieBuild<<<64, 1024>>>(d_trie, d_data, d_alloca, d_result);
+    TestTrieBuild<<<64, 1024>>>(d_trie, d_data, d_alloca, d_result, prefix);
     CUDA_ASSERT_SUCCESS(cudaGetLastError());
     CUDA_ASSERT_SUCCESS(cudaDeviceSynchronize());
 
@@ -149,6 +163,10 @@ static void _testTrie(const size_t num_seq, cuda_Trie *d_trie, cuda_Data *d_data
     cuda_Data::DeallocGPU(d_data);
     FastAllocator::DeallocGPU(d_alloca);
     delete h_result;
+}
+
+static void TestSplitBuild(uint32_t num_seq, cuda_Trie *d_trie, cuda_Data *d_data, FastAllocator *d_alloca) {
+    _testTrie(num_seq, d_trie + 1024, d_data, d_alloca, 1024);
 }
 
 static std::tuple<cuda_Trie *, cuda_Data *, FastAllocator *> _buildOnDevice(
@@ -183,10 +201,9 @@ static std::tuple<cuda_Trie *, cuda_Data *, FastAllocator *> _buildOnDevice(
         d_allocator
     );
     CUDA_ASSERT_SUCCESS(cudaGetLastError());
-    CUDA_ASSERT_SUCCESS(cudaStreamSynchronize(g_cudaGlobalConf->asyncStream));
 
     MergeBlockResults<<<1,kNumBlocksBuild, 0, g_cudaGlobalConf->asyncStream>>>(d_tries, mgr_data.bucket_prefix_len,
-        d_allocator);
+                                                                               d_allocator);
     CUDA_ASSERT_SUCCESS(cudaGetLastError());
 
     // ------------------------------
@@ -409,7 +426,7 @@ void TestCUDATrieCpuBuild(const BinSequencePack &pack) {
     std::cout << "Time spent on TRIE build and memory transfer: "
             << std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() << "ms" << std::endl;
 
-    _testTrie(pack.sequences.size(), d_trie, d_data, d_alloca);
+    _testTrie(pack.sequences.size(), d_trie, d_data, d_alloca, -1);
 }
 
 void TestCUDATrieGPUBuild(const BinSequencePack &pack) {
@@ -425,5 +442,5 @@ void TestCUDATrieGPUBuild(const BinSequencePack &pack) {
             << std::chrono::duration_cast<std::chrono::milliseconds>(t_trie_build_end - t_trie_build_start).count()
             << "ms" << std::endl;
 
-    _testTrie(pack.sequences.size(), d_trie, d_data, d_alloca);
+    _testTrie(pack.sequences.size(), d_trie, d_data, d_alloca, -1);
 }

@@ -3,6 +3,7 @@
 
 /* internal includes */
 #include <data.hpp>
+#include <string>
 
 class Runner {
     // ------------------------------
@@ -17,7 +18,7 @@ public:
     // class methods
     // ------------------------------
 
-    void Run(const BinSequencePack &data);
+    void Run(const BinSequencePack &data, const std::string& filename);
 
     // ------------------------------
     // Protected methods

@@ -46,7 +46,9 @@ void ArgParser::PrintHelp() {
             "- \"-g\" is an optional flag to generate data\n"
             "- \"-t\" is an optional flag to run a specific test\n"
             "- \"-v\" enables verbose mode\n"
-            "- \"-d\" enables writing DOT files for displaying TRIEs\n\n";
+            "- \"-d\" enables writing DOT files for displaying TRIEs\n"
+            "\n"
+            "If no -g and -t flags are provided the program will run default GPU algorithm and save results to <filename>.out\n\n";
 
     const auto test_names = Tester::GetTestNames();
     const auto test_descs = Tester::GetTestDescriptions();

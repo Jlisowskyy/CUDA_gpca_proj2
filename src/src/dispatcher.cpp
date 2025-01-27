@@ -4,6 +4,7 @@
 #include <runner.hpp>
 #include <cassert>
 #include <data_parser.hpp>
+#include <hamming.cuh>
 #include <tester.hpp>
 
 Dispatcher::Dispatcher(const ArgPack &arg_pack) : arg_pack_(arg_pack) {
@@ -15,7 +16,7 @@ void Dispatcher::Dispatch() const {
 
     if (!arg_pack_.gen_data && !arg_pack_.run_tests) {
         Runner runner{};
-        runner.Run(data_parser.ParseData(arg_pack_.filename));
+        runner.Run(data_parser.ParseData(arg_pack_.filename), arg_pack_.filename);
     }
 
     if (arg_pack_.gen_data) {
@@ -34,4 +35,5 @@ void Dispatcher::Dispatch() const {
         Tester tester{};
         tester.RunTests(arg_pack_.test_names, data_parser.ParseData(arg_pack_.filename));
     }
+
 }

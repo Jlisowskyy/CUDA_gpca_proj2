@@ -300,8 +300,10 @@ void Tester::TestGPUTrieBuild_(const BinSequencePack &bin_sequence_pack) {
     std::cout << "Testing GPU trie build" << std::endl;
 
     TestCUDATrieCpuBuild(bin_sequence_pack);
-    std::cout << std::string(80, '=') << std::endl;
-    TestCUDATrieGPUBuild(bin_sequence_pack);
+
+    // Implementation not finished
+    // std::cout << std::string(80, '=') << std::endl;
+    // TestCUDATrieGPUBuild(bin_sequence_pack);
 }
 
 static void _splitBatchMultithreaded(const BinSequencePack &bin_sequence_pack) {

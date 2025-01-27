@@ -13,7 +13,7 @@
 // Constants
 // ------------------------------
 
-static constexpr uint32_t kPrefixSize = 15;
+static constexpr uint32_t kPrefixSize = 11;
 static constexpr uint32_t kMaxThreadsBuild = pow2(kPrefixSize);
 static constexpr uint32_t kNumThreadsPerBlockBuild = 1024;
 static constexpr uint32_t kLog2NumThreadsPerBlockBuild = std::countr_zero(kNumThreadsPerBlockBuild);
