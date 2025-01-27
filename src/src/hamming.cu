@@ -11,10 +11,8 @@
 #include <chrono>
 #include <iostream>
 #include <barrier>
-#include <bit>
 #include <cstdio>
 #include <defines.hpp>
-#include <errno.h>
 #include <global_conf.hpp>
 
 static std::tuple<cuda_Trie *, cuda_Data *, FastAllocator *> InitHamming(const BinSequencePack &pack);
@@ -27,12 +25,12 @@ static std::vector<std::tuple<uint32_t, uint32_t> > Hamming1Distance(cuda_Trie *
 // ------------------------------
 
 __global__ void MergeBlockResults(cuda_Trie *out_tries, const uint32_t prefix_len, FastAllocator *allocator) {
-    const uint32_t trie_idx = threadIdx.x << 10;
+    const uint32_t trie_idx = threadIdx.x << kLog2NumThreadsPerBlockBuild;
     cuda_Trie &my_trie = out_tries[trie_idx];
 
     /* start merging by logarithmic reduction (INSIDE THE BLOCK) */
     const uint32_t other_thread_idx = trie_idx;
-    for (auto bit_pos = prefix_len - 1; bit_pos >= 10; --bit_pos) {
+    for (auto bit_pos = prefix_len - 1; bit_pos >= kLog2NumThreadsPerBlockBuild; --bit_pos) {
         const uint32_t mask = static_cast<uint32_t>(1) << bit_pos;
 
         if ((trie_idx & mask) != 0) {
@@ -44,14 +42,8 @@ __global__ void MergeBlockResults(cuda_Trie *out_tries, const uint32_t prefix_le
         cuda_Trie &other_trie = out_tries[other_thread_idx | mask];
         my_trie.MergeWithOther<true>(trie_idx, other_trie, *allocator);
 
-        printf("Mergin %d -> %d\n", (other_thread_idx | mask) >> 10, trie_idx >> 10);
-
         /* wait for other thread to finish */
         __syncthreads();
-
-        if (threadIdx.x == 0) {
-            printf("=========\n");
-        }
     }
 }
 
@@ -62,53 +54,42 @@ __global__ void BuildTrieKernel(cuda_Trie *out_tries,
                                 const cuda_Data *data,
                                 FastAllocator *allocator) {
     const uint32_t num_threads = gridDim.x * blockDim.x;
-
-    const uint32_t block_prefix = blockIdx.x << (prefix_len - 10);
-    const uint32_t thread_prefix = threadIdx.x;
-    const uint32_t full_idx = block_prefix | thread_prefix;
+    const uint32_t thread_idx = blockIdx.x * blockDim.x + threadIdx.x;
 
     /* load own data */
-    cuda_Trie &my_trie = out_tries[full_idx];
+    cuda_Trie &my_trie = out_tries[thread_idx];
     my_trie.Reset();
 
-    const uint32_t my_bucket_size = bucket_sizes[full_idx];
+    const uint32_t my_bucket_size = bucket_sizes[thread_idx];
 
     /* build trie */
     uint32_t bucket_offset = 0;
     for (; bucket_offset < my_bucket_size; ++bucket_offset) {
-        const uint32_t seq_idx = buckets[bucket_offset * num_threads + full_idx];
+        const uint32_t seq_idx = buckets[bucket_offset * num_threads + thread_idx];
         assert(seq_idx < data->GetNumSequences());
 
-        my_trie.Insert<true>(full_idx, *allocator, seq_idx, prefix_len, *data);
+        my_trie.Insert<true>(thread_idx, *allocator, seq_idx, prefix_len, *data);
     }
 
     /* wait for all threads to finish */
     __syncthreads();
 
     /* start merging by logarithmic reduction (INSIDE THE BLOCK) */
-    const uint32_t other_thread_idx = full_idx;
-    for (auto bit_pos = 9; bit_pos >= 0; --bit_pos) {
+    const uint32_t other_thread_idx = thread_idx;
+    for (int32_t bit_pos = kLog2NumThreadsPerBlockBuild - 1; bit_pos >= 0; --bit_pos) {
         const uint32_t mask = static_cast<uint32_t>(1) << bit_pos;
 
-        if ((full_idx & mask) != 0) {
+        if ((thread_idx & mask) != 0) {
             /* only threads with 0 on given position will merge */
             return;
         }
 
         /* take the other trie */
         cuda_Trie &other_trie = out_tries[other_thread_idx | mask];
-        my_trie.MergeWithOther<true>(full_idx, other_trie, *allocator);
-
-        if (blockIdx.x == 3) {
-            printf("Mergin %d -> %d\n", (other_thread_idx | mask) & 1023, full_idx & 1023);
-        }
+        my_trie.MergeWithOther<true>(thread_idx, other_trie, *allocator);
 
         /* wait for other thread to finish */
         __syncthreads();
-
-        if (blockIdx.x == 3 && threadIdx.x == 0) {
-            printf("=========\n");
-        }
     }
 }
 
@@ -181,19 +162,19 @@ static std::tuple<cuda_Trie *, cuda_Data *, FastAllocator *> _buildOnDevice(
     cuda_Data *d_data = data.DumpToGPU();
 
     /* prepare allocator */
-    FastAllocator allocator(kGpuThreadChunkSize, mgr_data.max_threads, true);
+    FastAllocator allocator(kGpuThreadChunkSize, kMaxThreadsBuild, true);
     FastAllocator *d_allocator = allocator.DumpToGPU();
 
     cuda_Trie *d_tries;
     CUDA_ASSERT_SUCCESS(
-        cudaMallocAsync(&d_tries, mgr_data.max_threads * sizeof(cuda_Trie), g_cudaGlobalConf->asyncStream));
+        cudaMallocAsync(&d_tries, kMaxThreadsBuild * sizeof(cuda_Trie), g_cudaGlobalConf->asyncStream));
 
     // ------------------------------
     // Build the TRIE on GPU
     // ------------------------------
 
     /* start trie build */
-    BuildTrieKernel<<<mgr_data.num_blocks, mgr_data.num_threads_per_block, 0, g_cudaGlobalConf->asyncStream>>>(
+    BuildTrieKernel<<<kNumBlocksBuild, kNumThreadsPerBlockBuild, 0, g_cudaGlobalConf->asyncStream>>>(
         d_tries,
         mgr_data.d_buckets,
         mgr_data.d_bucket_sizes,
@@ -202,8 +183,7 @@ static std::tuple<cuda_Trie *, cuda_Data *, FastAllocator *> _buildOnDevice(
         d_allocator
     );
     CUDA_ASSERT_SUCCESS(cudaGetLastError());
-
-    // std::abort();
+    CUDA_ASSERT_SUCCESS(cudaStreamSynchronize(g_cudaGlobalConf->asyncStream));
 
     MergeBlockResults<<<1, mgr_data.num_blocks, 0, g_cudaGlobalConf->asyncStream>>>(d_tries, mgr_data.bucket_prefix_len,
         d_allocator);
@@ -361,10 +341,6 @@ std::vector<std::tuple<uint32_t, uint32_t> > Hamming1Distance(cuda_Trie *d_trie,
     // Mem init
     // ------------------------------
 
-    /* calculate management data */
-    const ThreadMgr mgr{};
-    const auto mgr_data = mgr.PrepareSearchData();
-
     /* prepare allocator for solutions */
     cuda_Solution solutions{};
     cuda_Solution *d_sol = solutions.DumpToGPU();
@@ -375,7 +351,7 @@ std::vector<std::tuple<uint32_t, uint32_t> > Hamming1Distance(cuda_Trie *d_trie,
     // ------------------------------
 
     /* find all pairs */
-    FindAllHamming1Pairs<<<mgr_data.num_blocks, mgr_data.num_threads_per_block, 0, g_cudaGlobalConf->asyncStream>>>(
+    FindAllHamming1Pairs<<<kMaxBlocksSearch, kThreadsPerBlockSearch, 0, g_cudaGlobalConf->asyncStream>>>(
         d_trie, d_allocator, d_data, d_sol);
     CUDA_ASSERT_SUCCESS(cudaGetLastError());
     CUDA_ASSERT_SUCCESS(cudaStreamSynchronize(g_cudaGlobalConf->asyncStream));

@@ -1,6 +1,8 @@
 #ifndef DEFINES_CUH
 #define DEFINES_CUH
 
+#include <cinttypes>
+
 void AssertSuccess(cudaError_t error, const char *file, int line);
 
 bool TraceError(cudaError_t error, const char *file, int line);
@@ -25,5 +27,22 @@ static constexpr bool IsPowerOfTwo(T x) {
     return x && (!(x & (x - 1)));
 }
 
+static constexpr uint32_t pow2(const uint32_t pow) {
+    if (pow == 0) {
+        return 1;
+    }
+
+    return 2 * pow2(pow - 1);
+}
+
+static constexpr uint32_t GenMask(const uint32_t size) {
+    uint32_t mask{};
+
+    for (uint32_t i = 0; i < size; ++i) {
+        mask |= static_cast<uint32_t>(1) << i;
+    }
+
+    return mask;
+}
 
 #endif //DEFINES_CUH

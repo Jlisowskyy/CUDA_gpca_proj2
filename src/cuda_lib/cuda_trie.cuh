@@ -20,6 +20,7 @@ template<bool isGpu>
 [[nodiscard]] FAST_CALL_ALWAYS static uint32_t AllocateNode(FastAllocator &allocator, const uint32_t t_idx,
                                                             const uint32_t seq_idx = UINT32_MAX) {
     const uint32_t node_idx = allocator.AllocateNode<isGpu>(t_idx);
+    assert(node_idx != 0);
 
     allocator[node_idx].seq_idx = seq_idx;
     allocator[node_idx].next[0] = 0;

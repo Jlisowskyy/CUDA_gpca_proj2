@@ -12,53 +12,21 @@
 #include <chrono>
 #include <barrier>
 #include <atomic>
-#include <cstring>
-
-// ------------------------------
-// Helpers
-// ------------------------------
-
-static constexpr uint32_t pow2(const uint32_t pow) {
-    if (pow == 0) {
-        return 1;
-    }
-
-    return 2 * pow2(pow - 1);
-}
-
-static constexpr uint32_t GenMask(const uint32_t size) {
-    uint32_t mask{};
-
-    for (uint32_t i = 0; i < size; ++i) {
-        mask |= static_cast<uint32_t>(1) << i;
-    }
-
-    return mask;
-}
-
-// ------------------------------
-// Constants
-// ------------------------------
-
-static constexpr uint32_t kPrefixSize = 15;
 
 // ------------------------------
 // Implementations
 // ------------------------------
 
-MgrTrieBuildData ThreadMgr::PrepareTrieBuildData(const BinSequencePack &pack, bool enforce_gpu_build) const {
-    static constexpr uint32_t kMaxThreads = pow2(kPrefixSize);
-    static constexpr uint32_t kNumThreadsPerBlock = 512;
-
+MgrTrieBuildData ThreadMgr::PrepareTrieBuildData(const BinSequencePack &pack, const bool enforce_gpu_build) const {
     MgrTrieBuildData data{};
 
     /* fill allocator management */
     data.max_nodes = pack.sequences.size() * pack.max_seq_size_bits;
-    data.max_threads = kMaxThreads;
+    data.max_threads = kMaxThreadsBuild;
     data.max_nodes_per_thread = pack.max_seq_size_bits;
 
     /* fill trie kernel management */
-    data.num_threads_per_block = kNumThreadsPerBlock;
+    data.num_threads_per_block = kNumThreadsPerBlockBuild;
     data.num_blocks = data.max_threads / data.num_threads_per_block;
     assert(data.num_blocks <= 1024 && "Too many blocks");
 
@@ -69,18 +37,6 @@ MgrTrieBuildData ThreadMgr::PrepareTrieBuildData(const BinSequencePack &pack, bo
     std::cout << "Time spent on gpu bucket preparation: "
             << std::chrono::duration_cast<std::chrono::milliseconds>(t_bucket_end - t_bucket_start).count()
             << "ms" << std::endl;
-
-    return data;
-}
-
-MgrTrieSearchData ThreadMgr::PrepareSearchData() const {
-    static constexpr uint32_t kThreadsPerBlock = 512;
-    static constexpr uint32_t kMaxBlocks = 128;
-
-    MgrTrieSearchData data{};
-
-    data.num_threads_per_block = kThreadsPerBlock;
-    data.num_blocks = kMaxBlocks;
 
     return data;
 }
