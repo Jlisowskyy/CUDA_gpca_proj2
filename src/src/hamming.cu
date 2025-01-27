@@ -164,7 +164,6 @@ static std::tuple<cuda_Trie *, cuda_Data *, FastAllocator *> _buildOnDevice(
         d_data,
         d_allocator
     );
-    CUDA_ASSERT_SUCCESS(cudaStreamSynchronize(g_cudaGlobalConf->asyncStream));
 
     // ------------------------------
     // Cleanup
@@ -323,53 +322,31 @@ std::vector<std::tuple<uint32_t, uint32_t> > Hamming1Distance(cuda_Trie *d_trie,
     const auto mgr_data = mgr.PrepareSearchData();
 
     /* prepare allocator for solutions */
-    auto [d_sol, d_mem_block] = cuda_Solution::DumpToGPU(mgr_data.num_solutions);
+    cuda_Solution solutions{};
+    cuda_Solution* d_sol = solutions.DumpToGPU();
+    CUDA_ASSERT_SUCCESS(cudaStreamSynchronize(g_cudaGlobalConf->asyncStream));
 
     // ------------------------------
     // Processing
     // ------------------------------
 
-    CUDA_ASSERT_SUCCESS(cudaStreamSynchronize(g_cudaGlobalConf->asyncStream));
-
     /* find all pairs */
     FindAllHamming1Pairs<<<mgr_data.num_blocks, mgr_data.num_threads_per_block, 0, g_cudaGlobalConf->asyncStream>>>(
         d_trie, d_allocator, d_data, d_sol);
-
     CUDA_ASSERT_SUCCESS(cudaStreamSynchronize(g_cudaGlobalConf->asyncStream));
 
     // ------------------------------
     // Mem back transfer
     // ------------------------------
 
-    /* Process solutions */
-    std::vector<std::tuple<uint32_t, uint32_t> > solutions;
-    std::vector<uint32_t> h_sol;
-    h_sol.resize(cuda_Solution::GetMemBlockSize(mgr_data.num_solutions));
-    CUDA_ASSERT_SUCCESS(
-        cudaMemcpyAsync(h_sol.data(), d_mem_block, cuda_Solution::GetMemBlockSize(mgr_data.num_solutions),
-            cudaMemcpyDeviceToHost, g_cudaGlobalConf->asyncStream));
-
-    CUDA_ASSERT_SUCCESS(cudaStreamSynchronize(g_cudaGlobalConf->asyncStream));
-
-    for (size_t idx = 0; idx < mgr_data.num_solutions; ++idx) {
-        const uint32_t idx1 = h_sol[idx * 2];
-        const uint32_t idx2 = h_sol[idx * 2 + 1];
-
-        if (idx1 == UINT32_MAX || idx2 == UINT32_MAX) {
-            /* Solution are terminated by UINT32_MAX */
-            break;
-        }
-
-        solutions.emplace_back(idx1, idx2);
-    }
+    const auto results = cuda_Solution::DeallocGPU(d_sol);
 
     // ------------------------------
     // Cleanup
     // ------------------------------
 
-    /* cleanup solutions */
-    CUDA_ASSERT_SUCCESS(cudaFreeAsync(d_mem_block, g_cudaGlobalConf->asyncStream));
-    CUDA_ASSERT_SUCCESS(cudaFreeAsync(d_sol, g_cudaGlobalConf->asyncStream));
+    /* cleanup trie */
+    CUDA_ASSERT_SUCCESS(cudaFreeAsync(d_trie, g_cudaGlobalConf->asyncStream));
 
     /* cleanup data */
     cuda_Data::DeallocGPU(d_data);
@@ -377,10 +354,10 @@ std::vector<std::tuple<uint32_t, uint32_t> > Hamming1Distance(cuda_Trie *d_trie,
     /* cleanup allocator */
     FastAllocator::DeallocGPU(d_allocator);
 
-    /* cleanup trie */
-    CUDA_ASSERT_SUCCESS(cudaFreeAsync(d_trie, g_cudaGlobalConf->asyncStream));
+    /* cleanup solutions */
+    cuda_Solution::DeallocHost(&solutions);
 
-    return solutions;
+    return results;
 }
 
 std::vector<std::tuple<uint32_t, uint32_t> > FindHamming1PairsCUDA(const BinSequencePack &pack) {

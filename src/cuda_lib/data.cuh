@@ -35,13 +35,30 @@ struct Node_ {
 // Solution GPU storage
 // ------------------------------
 
-class alignas(128) cuda_Solution {
+class cuda_Solution {
+    static constexpr uint32_t kMaxPages = 16;
+    static constexpr uint32_t kPageSize = 64 * 1024 * 1024;
+
+    struct Solution_ {
+        uint32_t idx1{};
+        uint32_t idx2{};
+    };
+
+    static_assert(sizeof(Solution_) == 8);
+
+    static constexpr uint32_t kPageSizeInTypeSize = kPageSize / sizeof(Solution_);
+    static constexpr uint32_t kPageDivider = std::countr_zero(kPageSizeInTypeSize);
+    static constexpr uint32_t kPageRemainder = kPageSizeInTypeSize - 1;
+
+    static_assert(IsPowerOfTwo(sizeof(Solution_)));
+    static_assert(IsPowerOfTwo(kPageSizeInTypeSize));
+
 public:
     // ------------------------------
     // Constructors
     // ------------------------------
 
-    cuda_Solution() = default;
+    cuda_Solution();
 
     ~cuda_Solution() = default;
 
@@ -50,24 +67,72 @@ public:
     // ------------------------------
 
     void FAST_DCALL_ALWAYS PushSolution(const uint32_t idx1, const uint32_t idx2) {
-        const auto address =
-                reinterpret_cast<uint32_t *>(atomicAdd(reinterpret_cast<unsigned long long int *>(&_data), 2*sizeof(uint32_t)));
+        /* increment atomically offset */
+        const uint32_t my_address = atomicAdd(const_cast<uint32_t *>(&_last_page_offset), 1);
 
-        address[0] = idx1;
-        address[1] = idx2;
+        /* allocate page if needed */
+        const uint32_t page_offset = my_address & kPageRemainder;
+        const uint32_t cur_page = my_address >> kPageDivider;
+
+        if (page_offset == 0) {
+            /* wait for all previous pages to be allocated */
+            const uint32_t prev_page = cur_page - 1;
+            while (_last_page < prev_page) {
+                // spin
+            }
+            assert(_last_page == prev_page);
+
+            /* allocate new page */
+            const auto page = static_cast<Solution_ *>(malloc(sizeof(Solution_) * kPageSizeInTypeSize));
+            assert(page != nullptr);
+            assert(_last_page == prev_page);
+            assert(_pages[cur_page] == nullptr);
+            _pages[cur_page] = page;
+
+            /* update page counter */
+            _last_page = _last_page + 1;
+            __threadfence();
+        } else {
+            /* otherwise we should just wait for our page be allocated if it is not */
+            while (_last_page < cur_page) {
+                // spin
+            }
+            assert(_last_page >= cur_page);
+        }
+
+        /* save sol */
+        auto &sol = (*this)[my_address];
+        sol.idx1 = idx1;
+        sol.idx2 = idx2;
     }
 
-    [[nodiscard]] static size_t GetMemBlockSize(const size_t num_solutions) {
-        return num_solutions * 2 * sizeof(uint32_t);
+    [[nodiscard]] FAST_CALL_ALWAYS Solution_ &operator[](const uint32_t idx) {
+        assert(idx < _last_page_offset);
+        assert(_pages[idx / kPageSizeInTypeSize] != nullptr);
+        assert(idx != 0);
+        return _pages[idx >> kPageDivider][idx & kPageRemainder];
     }
 
-    static std::tuple<cuda_Solution *, uint32_t *> DumpToGPU(size_t num_solutions);
+    [[nodiscard]] FAST_CALL_ALWAYS const Solution_ &operator[](const uint32_t idx) const {
+        assert(idx < _last_page_offset);
+        assert(_pages[idx / kPageSizeInTypeSize] != nullptr);
+        assert(idx != 0);
+        return _pages[idx >> kPageDivider][idx & kPageRemainder];
+    }
+
+    cuda_Solution* DumpToGPU();
+
+    static std::vector<std::tuple<uint32_t, uint32_t> > DeallocGPU(cuda_Solution *d_solution);
+
+    static void DeallocHost(const cuda_Solution *h_solution);
 
     // ------------------------------
     // Class fields
     // ------------------------------
 protected:
-    uint32_t *_data{};
+    alignas(8) Solution_ **_pages{};
+    alignas(4) volatile uint32_t _last_page{};
+    alignas(4) volatile uint32_t _last_page_offset{};
 };
 
 // ------------------------------

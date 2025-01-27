@@ -18,7 +18,9 @@ bool TraceError(cudaError_t error, const char *file, int line);
 
 template<typename T>
 static constexpr bool IsPowerOfTwo(T x) {
-    if (x < 0) { return false; }
+    if constexpr (-static_cast<T>(1) < static_cast<T>(1)) {
+        if (x < 0) { return false; }
+    }
 
     return x && (!(x & (x - 1)));
 }

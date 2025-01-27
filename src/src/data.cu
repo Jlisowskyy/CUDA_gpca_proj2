@@ -9,19 +9,105 @@
 
 __device__ volatile int sem;
 
-std::tuple<cuda_Solution *, uint32_t *> cuda_Solution::DumpToGPU(const size_t num_solutions) {
-    uint32_t *d_data{};
-    CUDA_ASSERT_SUCCESS(cudaMallocAsync(&d_data, GetMemBlockSize(num_solutions), g_cudaGlobalConf->asyncStream));
-    CUDA_ASSERT_SUCCESS(
-        cudaMemsetAsync(d_data, UINT32_MAX, GetMemBlockSize(num_solutions), g_cudaGlobalConf->asyncStream));
+cuda_Solution::cuda_Solution() {
+    _pages = new Solution_ *[kMaxPages]{};
+    _pages[0] = static_cast<Solution_ *>(malloc(kPageSize));
 
-    cuda_Solution *d_solutions{};
-    CUDA_ASSERT_SUCCESS(cudaMallocAsync(&d_solutions, sizeof(cuda_Solution), g_cudaGlobalConf->asyncStream));
+    _last_page = 0;
+    _last_page_offset = 1;
+}
+
+cuda_Solution *cuda_Solution::DumpToGPU() {
+    Solution_ **d_pages;
+    CUDA_ASSERT_SUCCESS(cudaMallocAsync(&d_pages, kMaxPages * sizeof(Solution_ *), g_cudaGlobalConf->asyncStream));
+
+    auto **h_pages = new Solution_ *[kMaxPages]{};
+    for (uint32_t i = 0; i < kMaxPages; ++i) {
+        if (_pages[i] != nullptr) {
+            CUDA_ASSERT_SUCCESS(cudaMallocAsync(&h_pages[i], kPageSize, g_cudaGlobalConf->asyncStream));
+            CUDA_ASSERT_SUCCESS(cudaMemcpyAsync(h_pages[i], _pages[i], kPageSize, cudaMemcpyHostToDevice,
+                g_cudaGlobalConf->asyncStream));
+        }
+    }
+
+    // Copy the pages array to the GPU
+    CUDA_ASSERT_SUCCESS(cudaMemcpyAsync(d_pages, h_pages, kMaxPages * sizeof(Solution_ *), cudaMemcpyHostToDevice,
+        g_cudaGlobalConf->asyncStream));
+
+    // Allocate the solution object
+    cuda_Solution *d_solution;
+    CUDA_ASSERT_SUCCESS(cudaMallocAsync(&d_solution, sizeof(cuda_Solution), g_cudaGlobalConf->asyncStream));
+    CUDA_ASSERT_SUCCESS(cudaMemcpyAsync(d_solution, this, sizeof(cuda_Solution), cudaMemcpyHostToDevice,
+        g_cudaGlobalConf->asyncStream));
+
+    // update the pages array
+    CUDA_ASSERT_SUCCESS(cudaMemcpyAsync(&d_solution->_pages, &d_pages, sizeof(Solution_ **), cudaMemcpyHostToDevice,
+        g_cudaGlobalConf->asyncStream));
+
+    delete[] h_pages;
+    return d_solution;
+}
+
+std::vector<std::tuple<uint32_t, uint32_t> > cuda_Solution::DeallocGPU(cuda_Solution *d_solution) {
+    // Move solutions back to cpu
+    auto h_solution = static_cast<cuda_Solution *>(malloc(sizeof(cuda_Solution)));
+
     CUDA_ASSERT_SUCCESS(
-        cudaMemcpyAsync(&d_solutions->_data, &d_data, sizeof(uint32_t *), cudaMemcpyHostToDevice, g_cudaGlobalConf->
+        cudaMemcpyAsync(h_solution, d_solution, sizeof(cuda_Solution), cudaMemcpyDeviceToHost, g_cudaGlobalConf->
             asyncStream));
 
-    return {d_solutions, d_data};
+    // Move pages back to cpu
+    auto h_pages = new Solution_ *[kMaxPages]{};
+
+    CUDA_ASSERT_SUCCESS(cudaMemcpyAsync(h_pages, h_solution->_pages, kMaxPages * sizeof(Solution_ *),
+        cudaMemcpyDeviceToHost, g_cudaGlobalConf->asyncStream));
+
+    CUDA_ASSERT_SUCCESS(cudaStreamSynchronize(g_cudaGlobalConf->asyncStream));
+    auto d_pages = h_solution->_pages;
+
+    for (uint32_t i = 0; i < kMaxPages; ++i) {
+        if (h_pages[i] != nullptr) {
+            auto p = static_cast<Solution_ *>(malloc(kPageSize));
+
+            CUDA_ASSERT_SUCCESS(
+                cudaMemcpyAsync(p, h_pages[i], kPageSize, cudaMemcpyDeviceToHost, g_cudaGlobalConf->
+                    asyncStream));
+            CUDA_ASSERT_SUCCESS(cudaFreeAsync(h_pages[i], g_cudaGlobalConf->asyncStream));
+
+            h_pages[i] = p;
+        }
+    }
+    h_solution->_pages = h_pages;
+
+    // Move solutions back to cpu
+    std::vector<std::tuple<uint32_t, uint32_t> > results{};
+
+    for (uint32_t idx = 1; idx < h_solution->_last_page_offset; ++idx) {
+        auto &sol = (*h_solution)[idx];
+        results.emplace_back(sol.idx1, sol.idx2);
+    }
+
+    // Free the pages on CPU
+    DeallocHost(h_solution);
+
+    // Free the solution on CPU
+    free(h_solution);
+
+    CUDA_ASSERT_SUCCESS(cudaFreeAsync(d_solution, g_cudaGlobalConf->asyncStream));
+    CUDA_ASSERT_SUCCESS(cudaFreeAsync(d_pages, g_cudaGlobalConf->asyncStream));
+
+    return results;
+}
+
+void cuda_Solution::DeallocHost(const cuda_Solution *h_solution) {
+    for (uint32_t i = 0; i <= h_solution->_last_page; ++i) {
+        if (h_solution->_pages[i] != nullptr) {
+            free(h_solution->_pages[i]);
+        }
+    }
+
+    // Free the pages array
+    delete[] h_solution->_pages;
 }
 
 // ------------------------------
