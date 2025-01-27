@@ -36,8 +36,8 @@ struct Node_ {
 // ------------------------------
 
 class cuda_Solution {
-    static constexpr uint32_t kMaxPages = 16;
-    static constexpr uint32_t kPageSize = 64 * 1024 * 1024;
+    static constexpr uint32_t kMaxPages = 32;
+    static constexpr uint32_t kPageSize = 16 * 1024 * 1024;
 
     struct Solution_ {
         uint32_t idx1{};
