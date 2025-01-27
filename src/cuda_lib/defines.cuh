@@ -12,7 +12,8 @@ bool TraceError(cudaError_t error, const char *file, int line);
 
 #define HYBRID __host__ __device__
 
-#define FORCE_INLINE __forceinline__
+// #define FORCE_INLINE __forceinline__
+#define FORCE_INLINE inline
 
 #define FAST_CALL_ALWAYS FORCE_INLINE HYBRID
 
