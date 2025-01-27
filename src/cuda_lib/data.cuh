@@ -11,7 +11,6 @@
 #include <data.hpp>
 #include <barrier>
 #include <iostream>
-#include <cstdio>
 
 // ------------------------------
 // GPU data Node

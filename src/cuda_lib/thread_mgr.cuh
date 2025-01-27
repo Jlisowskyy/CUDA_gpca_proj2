@@ -31,8 +31,6 @@ struct MgrTrieBuildData {
 };
 
 struct MgrTrieSearchData {
-    uint32_t num_solutions{};
-
     uint32_t num_blocks{};
     uint32_t num_threads_per_block{};
 };

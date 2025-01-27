@@ -118,9 +118,6 @@ Trie::Node_ *Trie::_allocateNode(const size_t thread_idx, Args... args) const {
 }
 
 void Trie::MergeTriesByPrefix(std::vector<Trie> &tries, const size_t prefix_size) {
-    /* TODO: does not work when prefix is longer than some sequences */
-    /* TODO: ExtractBit */
-
     static const auto ExtractBit = [](const size_t item, const size_t idx) {
         return (item >> idx) & 1;
     };

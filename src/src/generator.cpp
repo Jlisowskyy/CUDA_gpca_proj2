@@ -159,7 +159,7 @@ BinSequencePack Generator::GenerateEnsureSolution() {
 BinSequencePack Generator::_GenerateEnsureSolution(size_t min_solutions, const GeneratorParams &params) {
     auto p = params;
     p.num_sequences = params.num_sequences - min_solutions;
-    auto data = GenerateRandomData(params);
+    auto data = GenerateRandomData(p);
 
     std::mt19937_64 gen(std::random_device{}());
 

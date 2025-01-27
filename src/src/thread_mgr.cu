@@ -40,16 +40,15 @@ static constexpr uint32_t GenMask(const uint32_t size) {
 // Constants
 // ------------------------------
 
-static constexpr uint32_t kPrefixSize = 8;
+static constexpr uint32_t kPrefixSize = 15;
 
 // ------------------------------
 // Implementations
 // ------------------------------
 
 MgrTrieBuildData ThreadMgr::PrepareTrieBuildData(const BinSequencePack &pack, bool enforce_gpu_build) const {
-    /* TODO: adjust */
     static constexpr uint32_t kMaxThreads = pow2(kPrefixSize);
-    static constexpr uint32_t kNumThreadsPerBlock = 256;
+    static constexpr uint32_t kNumThreadsPerBlock = 512;
 
     MgrTrieBuildData data{};
 
@@ -75,15 +74,11 @@ MgrTrieBuildData ThreadMgr::PrepareTrieBuildData(const BinSequencePack &pack, bo
 }
 
 MgrTrieSearchData ThreadMgr::PrepareSearchData() const {
-    /* TODO: replace with some logic */
-    static constexpr uint32_t kMaxSolutions = 1'000'00;
-
     static constexpr uint32_t kThreadsPerBlock = 512;
     static constexpr uint32_t kMaxBlocks = 128;
 
     MgrTrieSearchData data{};
 
-    data.num_solutions = kMaxSolutions;
     data.num_threads_per_block = kThreadsPerBlock;
     data.num_blocks = kMaxBlocks;
 
@@ -208,12 +203,12 @@ void ThreadMgr::_prepareBuckets(const BinSequencePack &pack, MgrTrieBuildData &d
 void ThreadMgr::_dumpBucketsToGpu(Buckets &buckets, MgrTrieBuildData &data, const uint32_t max_occup) const {
     assert([&]{
         for (size_t i = 0; i < data.max_threads; ++i) {
-            if (buckets.GetBucketSize(i) > max_occup) {
-                return false;
-            }
+        if (buckets.GetBucketSize(i) > max_occup) {
+        return false;
+        }
         }
         return true;
-    }());
+        }());
 
     /* allocate memory on gpu*/
     CUDA_ASSERT_SUCCESS(
